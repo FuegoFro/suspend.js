@@ -1,0 +1,6 @@
+[submodule "lib/jasmine"]
+	path = lib/jasmine
+	url = https://github.com/pivotal/jasmine.git
+[submodule "lib/esprima"]
+	path = lib/esprima
+	url = https://github.com/ariya/esprima.git
