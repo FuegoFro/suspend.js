@@ -1,5 +1,6 @@
-/* global describe, it, esprima, expect, Evaluator, jasmine, beforeEach */
-// Todo: Make sure esprima parses with raw
+/* global describe, it, esprima, expect, Evaluator, jasmine, beforeEach, afterEach */
+/* global xit */
+/* jshint evil:true, sub:true */
 // Todo: Use custom jasmine matchers
 // Todo: Use the field names the parser uses
 // Todo: Possibly use a better statement matching format?
@@ -12,16 +13,33 @@ describe('The evaluator module', function () {
     evaluator = new Evaluator();
   });
 
+  afterEach(function () {
+    var iframe = evaluator.context.scope.frameElement;
+    iframe.parentElement.removeChild(iframe);
+  });
+
+  it('creates an iframe to evaluate code in', function () {
+    var iframe = evaluator.context.scope.frameElement;
+    expect(iframe).toEqual(jasmine.any(evaluator.context.scope.HTMLIFrameElement));
+    expect(iframe.height).toEqual('0');
+    expect(iframe.width).toEqual('0');
+    expect(iframe.style.visibility).toEqual('hidden');
+  });
+
+  it('creates a temporary variable array in the global scope', function () {
+    expect(evaluator.context.eval('$__temp__')).toEqual([]);
+  });
+
   describe('when compiling', function () {
     function getExpressionBytecode(expressionString) {
-      var body = esprima.parse(expressionString, {raw: true}).body;
+      var body = esprima.parse(expressionString).body;
       expect(body.length).toEqual(1);
       expect(body[0].type).toEqual('ExpressionStatement');
       return evaluator.compileExpression(body[0].expression);
     }
 
     function getStatementsBytecode(statementsString) {
-      var ast = esprima.parse(statementsString, {raw: true}).body;
+      var ast = esprima.parse(statementsString).body;
       return evaluator.compileStatements(ast);
     }
 
@@ -48,8 +66,8 @@ describe('The evaluator module', function () {
     }
 
     function expectAstEqual(actual, expected) {
-      var actualAst = esprima.parse(actual, {raw: true}).body;
-      var expectedAst = esprima.parse(expected, {raw: true}).body;
+      var actualAst = esprima.parse(actual).body;
+      var expectedAst = esprima.parse(expected).body;
       expect(actualAst).toEqual(expectedAst);
     }
 
@@ -60,14 +78,14 @@ describe('The evaluator module', function () {
     describe('expression bytecode', function () {
       function expressionExpectNoChange(expressionString) {
         try {
-          var body = esprima.parse(expressionString, {raw: true}).body;
+          var body = esprima.parse(expressionString).body;
           expect(body.length).toEqual(1);
           expect(body[0].type).toEqual('ExpressionStatement');
           var bytecode = evaluator.compileExpression(body[0].expression);
           expect(bytecode.preInstructions).toEqual([]);
           // Compare AST to make sure is logically/syntactically the same,
           // even if formatting differs.
-          var reParsed = esprima.parse(bytecode.expression, {raw: true}).body;
+          var reParsed = esprima.parse(bytecode.expression).body;
           expect(reParsed).toEqual(body);
         } catch (e) {
           throw new Error('Failed to compile ' + expressionString + '. Error is: ' + e.toString());
@@ -76,7 +94,6 @@ describe('The evaluator module', function () {
 
       it('converts non-function calls to a string', function () {
         var original = [
-          'this', // This expression
           '"my string"', 'true', 'null', '123.45', '1.0e2', '/regex/', // literals
           '$my_id_', // identifier
           'this', // this keyword
@@ -200,8 +217,8 @@ describe('The evaluator module', function () {
         // Check that AST's match
         expect(compiled.length).toEqual(expectedStatements.length);
         $.each(compiled, function (i, c) {
-          var cParsed = esprima.parse(c, {raw: true});
-          var eParsed = esprima.parse(expectedStatements[i], {raw: true});
+          var cParsed = esprima.parse(c);
+          var eParsed = esprima.parse(expectedStatements[i]);
           expect(cParsed).toEqual(eParsed);
         });
       }
@@ -314,7 +331,7 @@ describe('The evaluator module', function () {
         var ifStatement = bytecode.instructions[0];
         expect(ifStatement.then.length).toEqual(1);
         expectAstEqual(ifStatement.then[0], 'a = 1');
-        expect(ifStatement.else).toBeNull();
+        expect(ifStatement.else).toEqual([]);
       });
 
       it('ignores labels', function () {
@@ -469,6 +486,31 @@ describe('The evaluator module', function () {
         }).toThrow('Does not support labelled breaks.');
       });
 
+      // Note that the tests for while and the tests for continue rely on each other
+      it('creates continue statements', function () {
+        var bytecode = getStatementsBytecode(
+          'while (true) {' +
+          '  continue;' +
+          '};'
+        );
+
+        var whileStatement = bytecode.instructions[0];
+        var continueStatement = whileStatement.instructions[1];
+        expect(continueStatement).toEqual(jasmine.any(evaluator.Continue));
+      });
+
+      it('doesn\'t allow labelled continues', function () {
+        var original =
+          'lbl:' +
+          'while (true) {' +
+          '  continue lbl;' +
+          '};';
+
+        expect(function () {
+          getStatementsBytecode(original);
+        }).toThrow('Does not support labelled continues.');
+      });
+
       describe('creating While loops', function () {
         it('desugars it into a loop', function () {
           var bytecode = getStatementsBytecode(
@@ -484,11 +526,12 @@ describe('The evaluator module', function () {
           //    break;
           //  a = 1 + 2
           //  a++
+          //  continue;
 
           expect(bytecode.instructions.length).toEqual(1);
           var loop = bytecode.instructions[0];
           expect(loop).toEqual(jasmine.any(evaluator.Loop));
-          expect(loop.instructions.length).toEqual(4);
+          expect(loop.instructions.length).toEqual(5);
           expectFunctionCall(loop.instructions[0], 'shouldStop', [], tempName(0));
 
           var ifStatement = loop.instructions[1];
@@ -496,9 +539,11 @@ describe('The evaluator module', function () {
           expectAstEqual(ifStatement.condition, '!!' + tempName(0));
           expect(ifStatement.then.length).toEqual(1);
           expect(ifStatement.then[0]).toEqual(jasmine.any(evaluator.Break));
+          expect(ifStatement.else).toEqual([]);
 
           expectAstEqual(loop.instructions[2], 'a = 1 + 2');
           expectAstEqual(loop.instructions[3], 'a++');
+          expect(loop.instructions[4]).toEqual(jasmine.any(evaluator.Continue));
         });
 
         it('uses function scope', function () {
@@ -530,11 +575,12 @@ describe('The evaluator module', function () {
           //  temp = shouldStop()
           //  if (!(!temp))
           //    break;
+          //  continue;
 
           expect(bytecode.instructions.length).toEqual(1);
           var loop = bytecode.instructions[0];
           expect(loop).toEqual(jasmine.any(evaluator.Loop));
-          expect(loop.instructions.length).toEqual(4);
+          expect(loop.instructions.length).toEqual(5);
           expectAstEqual(loop.instructions[0], 'a = 1 + 2');
           expectAstEqual(loop.instructions[1], 'a++');
           expectFunctionCall(loop.instructions[2], 'shouldStop', [], tempName(0));
@@ -544,6 +590,9 @@ describe('The evaluator module', function () {
           expectAstEqual(ifStatement.condition, '!!' + tempName(0));
           expect(ifStatement.then.length).toEqual(1);
           expect(ifStatement.then[0]).toEqual(jasmine.any(evaluator.Break));
+          expect(ifStatement.else).toEqual([]);
+
+          expect(loop.instructions[4]).toEqual(jasmine.any(evaluator.Continue));
         });
 
         it('uses function scope', function () {
@@ -576,6 +625,7 @@ describe('The evaluator module', function () {
           //  temp = a.push(i + 1);
           //  temp;
           //  i++;
+          //  continue;
 
           expect(bytecode.instructions.length).toEqual(3);
           expectFunctionCall(bytecode.instructions[0], 'initVar', [], tempName(0));
@@ -583,7 +633,7 @@ describe('The evaluator module', function () {
 
           var loop = bytecode.instructions[2];
           expect(loop).toEqual(jasmine.any(evaluator.Loop));
-          expect(loop.instructions.length).toEqual(5);
+          expect(loop.instructions.length).toEqual(6);
 
           expectFunctionCall(loop.instructions[0], 'lst', [], tempName(0));
 
@@ -592,10 +642,12 @@ describe('The evaluator module', function () {
           expectAstEqual(ifStatement.condition, '!(i !== ' + tempName(0) + '.length)');
           expect(ifStatement.then.length).toEqual(1);
           expect(ifStatement.then[0]).toEqual(jasmine.any(evaluator.Break));
+          expect(ifStatement.else).toEqual([]);
 
           expectFunctionCall(loop.instructions[2], 'a.push', ['i + 1'], tempName(0));
           expectAstEqual(loop.instructions[3], tempName(0));
           expectAstEqual(loop.instructions[4], 'i++');
+          expect(loop.instructions[5]).toEqual(jasmine.any(evaluator.Continue));
         });
 
         it('uses function scope', function () {
@@ -617,11 +669,13 @@ describe('The evaluator module', function () {
           expect(bytecode.instructions.length).toEqual(1); // Loop
           var forLoop = bytecode.instructions[0];
           expect(forLoop).toEqual(jasmine.any(evaluator.Loop));
-          expect(forLoop.instructions.length).toEqual(2); // Finished test and update
+          expect(forLoop.instructions.length).toEqual(3); // Finished test, update, continue
           expect(forLoop.instructions[0]).toEqual(jasmine.any(evaluator.If));
           expectAstEqual(forLoop.instructions[0].condition, '!b');
           expect(forLoop.instructions[0].then).toEqual([jasmine.any(evaluator.Break)]);
+          expect(forLoop.instructions[0].else).toEqual([]);
           expect(forLoop.instructions[1]).toEqual('c');
+          expect(forLoop.instructions[2]).toEqual(jasmine.any(evaluator.Continue));
 
           // No finished test
           bytecode = getStatementsBytecode('for (a; ; c) {}');
@@ -629,8 +683,9 @@ describe('The evaluator module', function () {
           expect(bytecode.instructions[0]).toEqual('a');
           forLoop = bytecode.instructions[1];
           expect(forLoop).toEqual(jasmine.any(evaluator.Loop));
-          expect(forLoop.instructions.length).toEqual(1); // Update
+          expect(forLoop.instructions.length).toEqual(2); // Update and continue
           expect(forLoop.instructions[0]).toEqual('c');
+          expect(forLoop.instructions[1]).toEqual(jasmine.any(evaluator.Continue));
 
           // No update
           bytecode = getStatementsBytecode('for (a; b; ) {}');
@@ -638,40 +693,287 @@ describe('The evaluator module', function () {
           expect(bytecode.instructions[0]).toEqual('a');
           forLoop = bytecode.instructions[1];
           expect(forLoop).toEqual(jasmine.any(evaluator.Loop));
-          expect(forLoop.instructions.length).toEqual(1); // Finished test
+          expect(forLoop.instructions.length).toEqual(2); // Finished test and continue
           expect(forLoop.instructions[0]).toEqual(jasmine.any(evaluator.If));
           expectAstEqual(forLoop.instructions[0].condition, '!b');
           expect(forLoop.instructions[0].then).toEqual([jasmine.any(evaluator.Break)]);
+          expect(forLoop.instructions[0].else).toEqual([]);
+          expect(forLoop.instructions[1]).toEqual(jasmine.any(evaluator.Continue));
         });
-      });
-
-      it('creates continue statements', function () {
-        var bytecode = getStatementsBytecode(
-          'while (true) {' +
-          '  continue;' +
-          '};'
-        );
-
-        var whileStatement = bytecode.instructions[0];
-        var continueStatement = whileStatement.instructions[1];
-        expect(continueStatement).toEqual(jasmine.any(evaluator.Continue));
-      });
-
-      it('doesn\'t allow labelled continues', function () {
-        var original =
-          'lbl:' +
-          'while (true) {' +
-          '  continue lbl;' +
-          '};';
-
-        expect(function () {
-          getStatementsBytecode(original);
-        }).toThrow('Does not support labelled continues.');
       });
 
       // Todo: Handle labelled continues and breaks
       // Todo: Handle try, throw, catch
       // Todo: Handle For ... In loops
+      // Todo: Handle object getters and setters
+    });
+  });
+
+  describe('when interpreting bytecode', function () {
+    it('uses its context to evaluate non-function expressions', function () {
+      var num = 5;
+      var testId = {
+        foo: 'foo value',
+        bar: 'bar value',
+        0: 'zero value',
+        9: 'num value'
+      };
+      evaluator.context.setValue('num', num);
+      evaluator.context.setValue('testId', testId);
+
+      // each line may rely on the previous line
+      var expressions = [
+        ['"my string"', 'my string'],
+        ['true', true],
+        ['null', null],
+        ['123.45', 123.45],
+        ['1.0e2', 1.0e2],
+        ['/regex/', /regex/],
+        ['testId', testId],
+        ['[1, true, "hi", testId]', [1, true, 'hi', testId]],
+        ['({a: 1})', {a: 1}],
+        ['({msg: "hello", arr: [1,2,3], obj: {foo: "bar"}})',
+          ({msg: 'hello', arr: [1,2,3], obj: {foo: 'bar'}})],
+        ['1, 2, "red", "blue"', (1, 2, 'red', 'blue')],
+        ['-num', -5], // num = 5
+        ['+5', 5],
+        ['!"hey"', false],
+        ['typeof testId', 'object'],
+        ['void "hi"', undefined],
+        ['num in testId', false],
+        ['"0" == false', true],
+        ['foo = 12', 12],
+        ['num += 4', 9], // num starts at 5 - num + 4 = 9
+        ['foo++', 12],
+        ['++foo', 14],
+        ['true || false', true],
+        ['true ? " " : ""', ' '],
+        ['testId.foo', 'foo value'],
+        ['testId["bar"]', 'bar value'],
+        ['testId[0]', 'zero value'],
+        ['testId[num]', 'num value'],
+        ['(1 + 2) * 3', 9],
+        ['false && true || true', true],
+        ['false && (true || true)', false]
+      ];
+
+      $.each(expressions, function (i, pair) {
+        var inputString = pair[0];
+        var outputValue = pair[1];
+        var evaluated = evaluator.eval(inputString);
+        expect(evaluated).toEqual(outputValue);
+      });
+    });
+    
+    it('conditionally executes code in If blocks', function () {
+      var program = '' +
+        'a = 0;' +
+        'if (val) {' +
+        '  a += 1;' +
+        '} else {' +
+        '  a += 2;' +
+        '}' +
+        'a;';
+      evaluator.eval('val = true');
+      expect(evaluator.eval(program)).toEqual(1);
+      evaluator.eval('val = false');
+      expect(evaluator.eval(program)).toEqual(2);
+    });
+
+    it('can break out of loops', function () {
+      var program = '' +
+        'a = 0;' +
+        'while (true) {' +
+        '  break;' +
+        '  a = 1;' +
+        '}' +
+        'a;';
+      expect(evaluator.eval(program)).toEqual(0);
+    });
+
+    it('can break out of nested blocks', function () {
+      var program = '' +
+        'a = 0;' +
+        'while (true) {' +
+        '  if (true) break;' +
+        '  a = 1;' +
+        '}' +
+        'a;';
+      expect(evaluator.eval(program)).toEqual(0);
+
+      program = '' +
+        'a = 0;' +
+        'do {' +
+        '  while (true) {' +
+        '    if (true) break;' +
+        '    a += 1;' +
+        '  }' +
+        '  a += 2' +
+        '} while (false)' +
+        'a;';
+      expect(evaluator.eval(program)).toEqual(2);
+    });
+
+    // Todo: continue in do..while is wrong. The following is supposed to exit:
+    //    do {
+    //      continue;
+    //    } while (false)
+    // but right now it loops forever
+    it('can continue in loops', function () {
+      var program = '' +
+        'a = 0;' +
+        'while (true) {' +
+        '  if (a > 0) break;' +
+        '  a++;' +
+        '  continue;' +
+        '  a = 5;' +
+        '}' +
+        'a;';
+      expect(evaluator.eval(program)).toEqual(1);
+    });
+
+    it('can continue in nested blocks', function () {
+      var program = '' +
+        'a = 0;' +
+        'while (true) {' +
+        '  if (a > 0) break;' +
+        '  a++;' +
+        '  if (true) continue;' +
+        '  a = 5;' +
+        '}' +
+        'a;';
+      expect(evaluator.eval(program)).toEqual(1);
+    });
+
+    it('repeats loops normally', function () {
+      var program = '' +
+        'a = 0;' +
+        'while (a != 3) {' +
+        '  a++;' +
+        '}' +
+        'a;';
+      expect(evaluator.eval(program)).toEqual(3);
+
+      program = '' +
+        'arr = [1,2,3];' +
+        'for (i = 0; i < arr.length; i++) {' +
+        '  arr[i] *= arr[i];' +
+        '}' +
+        'arr;';
+      expect(evaluator.eval(program)).toEqual([1, 4, 9]);
+    });
+
+    it('will call native functions', function () {
+      var myNativeFunc = jasmine.createSpy().andReturn(12);
+      evaluator.context.setValue('myNativeFunc', myNativeFunc);
+      expect(evaluator.eval('myNativeFunc("hi", false)')).toEqual(12);
+      expect(myNativeFunc).toHaveBeenCalledWith('hi', false);
+    });
+
+    it('can define and call user functions', function () {
+      var program = '' +
+        'o = {foo: 1};' +
+        'f = function () {' +
+        '  o.foo += 1;' +
+        '};' +
+        'f();' +
+        'o;';
+      expect(evaluator.eval(program)).toEqual({foo: 2});
+    });
+
+    it('uses function scope when calling functions', function () {
+      var program = '' +
+        'a = 1;' +
+        'b = 2;' +
+        'c = 3;' +
+        'f = function (a) {' +
+        '  a += 1;' +
+        '  var b = 6;' +
+        '  c = a + b;' +
+        '};' +
+        'f(4);' +
+        '[a, b, c];';
+      evaluator.eval('val = 3');
+      expect(evaluator.eval(program)).toEqual([1, 2, 11]);
+    });
+
+    it('can return values', function () {
+      var program = '' +
+        'increment = function (val) {' +
+        '  return val + 1;' +
+        '};' +
+        'increment(5);';
+      expect(evaluator.eval(program)).toEqual(6);
+    });
+
+    it('handles nested functions and has closures', function () {
+      var program = '' +
+        'counter = function () {' +
+        '  var count = 0;' +
+        '  return function () {' +
+        '    return count++;' +
+        '  };' +
+        '};' +
+        'firstCounter = counter();' +
+        'firstRes = [];' +
+        'firstRes.push(firstCounter());' +
+        'firstRes.push(firstCounter());' +
+        'secondCounter = counter();' +
+        'secondRes = [];' +
+        'secondRes.push(secondCounter());' +
+        'firstRes.push(firstCounter());' +
+        'secondRes.push(secondCounter());' +
+        'secondRes.push(secondCounter());' +
+        'firstRes.push(firstCounter());' +
+        'firstRes.push(firstCounter());' +
+        '[firstRes, secondRes]';
+      expect(evaluator.eval(program)).toEqual([[0, 1, 2, 3, 4], [0, 1, 2]]);
+    });
+
+    // Todo: More scoping tests
+
+    xit('jumps to the correct case in a switch statement', function () {
+      var program = '' +
+        'a = 0;' +
+        'switch (val) {' +
+        'case 0:' +
+        '  a += 1;' +
+        '  break;' +
+        'case 1:' +
+        '  a += 2;' +
+        'case 2:' +
+        '  a += 3;' +
+        '  break;' +
+        '}' +
+        'a;';
+      evaluator.eval('val = 0');
+      expect(evaluator.eval(program)).toEqual(1);
+      evaluator.eval('val = 1');
+      expect(evaluator.eval(program)).toEqual(5);
+      evaluator.eval('val = 2');
+      expect(evaluator.eval(program)).toEqual(3);
+      evaluator.eval('val = 3'); // Does not match any case
+      expect(evaluator.eval(program)).toEqual(0);
+    });
+
+    xit('will use the default case in a switch if no other cases match', function () {
+      var program = '' +
+        'a = 0;' +
+        'switch (val) {' +
+        'case 0:' +
+        '  a += 1;' +
+        'default:' +
+        '  a += 2;' +
+        'case 1:' +
+        '  a += 3;' +
+        '}' +
+        'a;';
+      evaluator.eval('val = 0');
+      expect(evaluator.eval(program)).toEqual(6);
+      evaluator.eval('val = 1');
+      expect(evaluator.eval(program)).toEqual(3);
+      evaluator.eval('val = 2'); // Default case
+      expect(evaluator.eval(program)).toEqual(5);
     });
   });
 });
@@ -698,3 +1000,6 @@ describe('The evaluator module', function () {
 //    Also need to handle everything defined on Function.prototype
 //      (eg call, apply, toString).
 // Todo: Don't allow eval or eval-like functionality
+// Todo: Test delete with scoping
+// Todo: Make sure 'this' and 'arguments' work
+// Todo: Make sure all 'hidden' variables are defined/work
