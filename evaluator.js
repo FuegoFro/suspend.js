@@ -543,13 +543,21 @@ Evaluator = (function () {
   }
 
   EvaluatorClass.prototype.eval = function (string) {
+    this.isRunning = true;
     var ast = esprima.parse(string).body;
     var bytecode = compileStatements(ast);
-    var instruction, lastResult;
     this.context.pushState(bytecode.instructions);
 
+    return this.execute();
+  };
+
+  EvaluatorClass.prototype.execute = function () {
+    var instruction, lastResult;
     while (!this.context.finishedExecution()) {
       while (this.context.hasMoreInstructions()) {
+        if (!this.isRunning) {
+          return undefined;
+        }
         instruction = this.context.getNextInstruction();
         if (typeof instruction === 'string') {
           lastResult = this.context.eval(instruction);
@@ -560,6 +568,16 @@ Evaluator = (function () {
       this.context.popState();
     }
     return lastResult;
+  };
+
+  EvaluatorClass.prototype.pause = function () {
+    this.isRunning = false;
+  };
+
+  EvaluatorClass.prototype.resume = function () {
+    this.isRunning = true;
+    console.log('In Resume');
+    this.execute();
   };
 
   EvaluatorClass.prototype.compileStatements = compileStatements;

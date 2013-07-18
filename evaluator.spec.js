@@ -20,7 +20,12 @@ describe('The evaluator module', function () {
 
   it('creates an iframe to evaluate code in', function () {
     var iframe = evaluator.context.scope.frameElement;
-    expect(iframe).toEqual(jasmine.any(evaluator.context.scope.HTMLIFrameElement));
+    // Need to test against both the global iframe and the iframe's iframe as
+    // a workaround for PhantomJS. Really, we just care that it's an iframe.
+    var isIFrame = iframe instanceof HTMLIFrameElement ||
+      iframe instanceof evaluator.context.scope.HTMLIFrameElement;
+    expect(isIFrame).toBe(true);
+
     expect(iframe.height).toEqual('0');
     expect(iframe.width).toEqual('0');
     expect(iframe.style.visibility).toEqual('hidden');
@@ -345,7 +350,6 @@ describe('The evaluator module', function () {
       });
 
       // Todo: Skipping labels, not allowing labelled breaks/continues for now
-      // Todo: Break, continue
 
       it('creates With blocks with function scope', function () {
         var bytecode = getStatementsBytecode(
@@ -975,6 +979,32 @@ describe('The evaluator module', function () {
       evaluator.eval('val = 2'); // Default case
       expect(evaluator.eval(program)).toEqual(5);
     });
+    // Todo: Make sure switch doesn't evaluate all case expressions, just the ones it gets to
+
+    it('can pause execution', function () {
+      var pauseExecFunc = function () {
+        evaluator.pause();
+      };
+      var myObject = {val: 0};
+      evaluator.context.setValue('pauseExecFunc', pauseExecFunc);
+      evaluator.context.setValue('myObject', myObject);
+      var program = '' +
+        'f = function () {' +
+        '  myObject.val = 1;' +
+        '  pauseExecFunc();' +
+        '  myObject.val = 2;' +
+        '};' +
+        'f();' +
+        'pauseExecFunc();' +
+        'myObject.val = 3;';
+
+      evaluator.eval(program);
+      expect(myObject.val).toEqual(1);
+      evaluator.resume();
+      expect(myObject.val).toEqual(2);
+      evaluator.resume();
+      expect(myObject.val).toEqual(3);
+    });
   });
 });
 
@@ -1003,3 +1033,9 @@ describe('The evaluator module', function () {
 // Todo: Test delete with scoping
 // Todo: Make sure 'this' and 'arguments' work
 // Todo: Make sure all 'hidden' variables are defined/work
+// Todo: Make sure declared functions work
+// Todo: Test when a function's name is re-defined within the function
+// Todo: 'var' statements should evaluate to undefined
+// Todo: After resuming, errors need to bubble up
+//    - entire result passing system needs to be callback based
+// Todo: Errors should clear the execution state/stack
