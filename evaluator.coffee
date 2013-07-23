@@ -28,17 +28,17 @@ compileStatements = (statements) ->
   subExpression = (toCompile) ->
     return null if toCompile is null
     compiled = compileExpression(toCompile)
-    $.merge instructions, compiled.preInstructions
+    merge instructions, compiled.preInstructions
     compiled.expression
 
   subStatements = (toCompile) ->
     return [] if toCompile is null
-    toCompile = [toCompile]  unless $.isArray(toCompile)
+    toCompile = [toCompile]  unless Array.isArray(toCompile)
     bytecode = compileStatements(toCompile)
     for name in bytecode.declaredVariables
       declaredVariables[name] = 1
 
-    $.merge declaredFunctions, bytecode.declaredFunctions
+    merge declaredFunctions, bytecode.declaredFunctions
     bytecode.instructions
 
   makeLoopTest = (test) ->
@@ -48,7 +48,7 @@ compileStatements = (statements) ->
     # We know that the expression will always be a string
     negatedCondition = "!(" + testBytecode.expression + ")"
     loopTest = new If(negatedCondition, [new Break()], [])
-    $.merge instructions, [loopTest]
+    merge instructions, [loopTest]
 
   instructions = []
   declaredVariables = {}
@@ -72,14 +72,14 @@ compileStatements = (statements) ->
         value = subExpression(statement.argument)
         instructions.push new Return(value)
       when "BlockStatement"
-        $.merge instructions, subStatements(statement.body)
+        merge instructions, subStatements(statement.body)
       when "IfStatement"
         condition = subExpression(statement.test)
         thenClause = subStatements(statement.consequent)
         elseClause = subStatements(statement.alternate)
         instructions.push new If(condition, thenClause, elseClause)
       when "LabeledStatement"
-        $.merge instructions, subStatements(statement.body)
+        merge instructions, subStatements(statement.body)
       when "BreakStatement"
         throw new Error("Does not support labelled breaks.")  if statement.label isnt null
         instructions.push new Break()
@@ -100,7 +100,7 @@ compileStatements = (statements) ->
             # Do not call subExpression, do not want instructions merged into
             # current scope (before switch)
             testBytecode = compileExpression(switchCase.test)
-            testInstructions = $.merge(testBytecode.preInstructions, [new Return(testBytecode.expression)])
+            testInstructions = merge(testBytecode.preInstructions, [new Return(testBytecode.expression)])
             body =
               declaredFunctions: []
               declaredVariables: []
@@ -110,39 +110,39 @@ compileStatements = (statements) ->
               index: subInstructions.length
           else
             defaultIndex = subInstructions.length
-          $.merge subInstructions, subStatements(switchCase.consequent)
+          merge subInstructions, subStatements(switchCase.consequent)
 
         instructions.push new Switch(value, subInstructions, caseMappings, defaultIndex)
       when "WhileStatement"
         loopInstructions = []
-        $.merge loopInstructions, makeLoopTest(statement.test)
-        $.merge loopInstructions, subStatements(statement.body)
+        merge loopInstructions, makeLoopTest(statement.test)
+        merge loopInstructions, subStatements(statement.body)
         instructions.push new Loop(loopInstructions)
       when "DoWhileStatement"
         loopInstructions = []
-        $.merge loopInstructions, subStatements(statement.body)
-        $.merge loopInstructions, makeLoopTest(statement.test)
+        merge loopInstructions, subStatements(statement.body)
+        merge loopInstructions, makeLoopTest(statement.test)
         instructions.push new Loop(loopInstructions)
       when "ForStatement"
 
         # Initializers
         if statement.init isnt null
           if statement.init.type is "VariableDeclaration"
-            $.merge instructions, subStatements(statement.init)
+            merge instructions, subStatements(statement.init)
           else
             instructions.push subExpression(statement.init)
         loopInstructions = []
 
         # Test
-        $.merge loopInstructions, makeLoopTest(statement.test)  if statement.test isnt null
+        merge loopInstructions, makeLoopTest(statement.test)  if statement.test isnt null
 
         # Loop body
-        $.merge loopInstructions, subStatements(statement.body)
+        merge loopInstructions, subStatements(statement.body)
 
         # Update
         if statement.update isnt null
           updateBytecode = compileExpression(statement.update)
-          $.merge loopInstructions, updateBytecode.preInstructions
+          merge loopInstructions, updateBytecode.preInstructions
           loopInstructions.push updateBytecode.expression
         instructions.push new Loop(loopInstructions)
 
@@ -155,7 +155,7 @@ compileStatements = (statements) ->
 compileExpression = (expression, currentTemp) ->
   subExpression = (toCompile) ->
     compiled = compileExpression(toCompile, currentTemp)
-    $.merge extraInstructions, compiled.preInstructions
+    merge extraInstructions, compiled.preInstructions
     compiled.expression
 
   getTempVariable = ->
@@ -436,7 +436,10 @@ class Context
 
 class EvaluatorClass
   constructor: ->
-    iframe = $("<iframe width=\"0\" height=\"0\"></iframe>").css(visibility: "hidden").appendTo("body").get(0)
+    iframe = document.createElement("iframe")
+    iframe.height = iframe.width = 0
+    iframe.style["visibility"] = "hidden"
+    document.body.appendChild(iframe)
     @context = new Context(iframe.contentWindow)
     iframe.contentWindow["$__temp__"] = []
 
@@ -483,3 +486,25 @@ EvaluatorClass::With = With
 EvaluatorClass::Switch = Switch
 EvaluatorClass::Loop = Loop
 window.Evaluator = EvaluatorClass
+
+# Helper functions
+
+unless Array.isArray
+  Array.isArray = (vArg) ->
+    Object.prototype.toString.call(vArg) is "[object Array]";
+
+merge = (first, second) ->
+  # Taken from jQuery
+  i = first.length
+  l = second.length
+  j = 0
+
+  if typeof l is "number"
+    for j in [0...l]
+      first[i++] = second[j]
+  else
+    while second[j] != undefined
+      first[i++] = second[j++]
+
+  first.length = i;
+  return first

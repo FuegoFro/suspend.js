@@ -1,9 +1,3 @@
-# global describe, it, esprima, expect, Evaluator, jasmine, beforeEach, afterEach 
-
-# global xit 
-
-# jshint evil:true, sub:true 
-
 # Todo: Use custom jasmine matchers
 # Todo: Use the field names the parser uses
 # Todo: Possibly use a better statement matching format?
