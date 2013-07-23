@@ -9,7 +9,7 @@ module.exports = function (grunt) {
       dist: {
         src: 'dist/evaluator.compiled.js',
         options: {
-          specs: 'evaluator.spec.js',
+          specs: 'deist/evaluator.spec.js',
           vendor: [
             'lib/esprima/esprima.js',
             'https://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js'
@@ -30,7 +30,8 @@ module.exports = function (grunt) {
     coffee: {
       compile: {
         files: {
-          'dist/evaluator.compiled.js': 'evaluator.coffee'
+          'dist/evaluator.compiled.js': 'evaluator.coffee',
+          'dist/evaluator.spec.js': 'evaluator.spec.coffee'
         }
       }
     },
