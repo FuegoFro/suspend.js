@@ -318,10 +318,10 @@ describe('The evaluator module', function () {
         var ifStatement = bytecode.instructions[2];
         expect(ifStatement).toEqual(jasmine.any(evaluator.If));
         expectAstEqual(ifStatement.condition, '!' + tempName(0));
-        expect(ifStatement.then.length).toEqual(1);
-        expectAstEqual(ifStatement.then[0], 'a = 1');
-        expect(ifStatement.else.length).toEqual(1);
-        expectAstEqual(ifStatement.else[0], 'b = 2');
+        expect(ifStatement.thenCase.length).toEqual(1);
+        expectAstEqual(ifStatement.thenCase[0], 'a = 1');
+        expect(ifStatement.elseCase.length).toEqual(1);
+        expectAstEqual(ifStatement.elseCase[0], 'b = 2');
 
         expectAstEqual(bytecode.instructions[3], 'c = "hello"');
       });
@@ -334,9 +334,9 @@ describe('The evaluator module', function () {
         );
         expect(bytecode.instructions.length).toEqual(1);
         var ifStatement = bytecode.instructions[0];
-        expect(ifStatement.then.length).toEqual(1);
-        expectAstEqual(ifStatement.then[0], 'a = 1');
-        expect(ifStatement.else).toEqual([]);
+        expect(ifStatement.thenCase.length).toEqual(1);
+        expectAstEqual(ifStatement.thenCase[0], 'a = 1');
+        expect(ifStatement.elseCase).toEqual([]);
       });
 
       it('ignores labels', function () {
@@ -541,9 +541,9 @@ describe('The evaluator module', function () {
           var ifStatement = loop.instructions[1];
           expect(ifStatement).toEqual(jasmine.any(evaluator.If));
           expectAstEqual(ifStatement.condition, '!!' + tempName(0));
-          expect(ifStatement.then.length).toEqual(1);
-          expect(ifStatement.then[0]).toEqual(jasmine.any(evaluator.Break));
-          expect(ifStatement.else).toEqual([]);
+          expect(ifStatement.thenCase.length).toEqual(1);
+          expect(ifStatement.thenCase[0]).toEqual(jasmine.any(evaluator.Break));
+          expect(ifStatement.elseCase).toEqual([]);
 
           expectAstEqual(loop.instructions[2], 'a = 1 + 2');
           expectAstEqual(loop.instructions[3], 'a++');
@@ -592,9 +592,9 @@ describe('The evaluator module', function () {
           var ifStatement = loop.instructions[3];
           expect(ifStatement).toEqual(jasmine.any(evaluator.If));
           expectAstEqual(ifStatement.condition, '!!' + tempName(0));
-          expect(ifStatement.then.length).toEqual(1);
-          expect(ifStatement.then[0]).toEqual(jasmine.any(evaluator.Break));
-          expect(ifStatement.else).toEqual([]);
+          expect(ifStatement.thenCase.length).toEqual(1);
+          expect(ifStatement.thenCase[0]).toEqual(jasmine.any(evaluator.Break));
+          expect(ifStatement.elseCase).toEqual([]);
 
           expect(loop.instructions[4]).toEqual(jasmine.any(evaluator.Continue));
         });
@@ -644,9 +644,9 @@ describe('The evaluator module', function () {
           var ifStatement = loop.instructions[1];
           expect(ifStatement).toEqual(jasmine.any(evaluator.If));
           expectAstEqual(ifStatement.condition, '!(i !== ' + tempName(0) + '.length)');
-          expect(ifStatement.then.length).toEqual(1);
-          expect(ifStatement.then[0]).toEqual(jasmine.any(evaluator.Break));
-          expect(ifStatement.else).toEqual([]);
+          expect(ifStatement.thenCase.length).toEqual(1);
+          expect(ifStatement.thenCase[0]).toEqual(jasmine.any(evaluator.Break));
+          expect(ifStatement.elseCase).toEqual([]);
 
           expectFunctionCall(loop.instructions[2], 'a.push', ['i + 1'], tempName(0));
           expectAstEqual(loop.instructions[3], tempName(0));
@@ -676,8 +676,8 @@ describe('The evaluator module', function () {
           expect(forLoop.instructions.length).toEqual(3); // Finished test, update, continue
           expect(forLoop.instructions[0]).toEqual(jasmine.any(evaluator.If));
           expectAstEqual(forLoop.instructions[0].condition, '!b');
-          expect(forLoop.instructions[0].then).toEqual([jasmine.any(evaluator.Break)]);
-          expect(forLoop.instructions[0].else).toEqual([]);
+          expect(forLoop.instructions[0].thenCase).toEqual([jasmine.any(evaluator.Break)]);
+          expect(forLoop.instructions[0].elseCase).toEqual([]);
           expect(forLoop.instructions[1]).toEqual('c');
           expect(forLoop.instructions[2]).toEqual(jasmine.any(evaluator.Continue));
 
@@ -700,8 +700,8 @@ describe('The evaluator module', function () {
           expect(forLoop.instructions.length).toEqual(2); // Finished test and continue
           expect(forLoop.instructions[0]).toEqual(jasmine.any(evaluator.If));
           expectAstEqual(forLoop.instructions[0].condition, '!b');
-          expect(forLoop.instructions[0].then).toEqual([jasmine.any(evaluator.Break)]);
-          expect(forLoop.instructions[0].else).toEqual([]);
+          expect(forLoop.instructions[0].thenCase).toEqual([jasmine.any(evaluator.Break)]);
+          expect(forLoop.instructions[0].elseCase).toEqual([]);
           expect(forLoop.instructions[1]).toEqual(jasmine.any(evaluator.Continue));
         });
       });
