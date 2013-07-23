@@ -7,7 +7,7 @@ module.exports = function (grunt) {
 
     jasmine: {
       dist: {
-        src: 'evaluator.js',
+        src: 'dist/evaluator.compiled.js',
         options: {
           specs: 'evaluator.spec.js',
           vendor: [
@@ -25,11 +25,31 @@ module.exports = function (grunt) {
       options: {
         jshintrc: '.jshintrc'
       }
+    },
+
+    coffee: {
+      compile: {
+        files: {
+          'dist/evaluator.compiled.js': 'evaluator.coffee'
+        }
+      }
+    },
+
+    watch: {
+      scripts: {
+        files: ['*.coffee'],
+        tasks: ['coffee'],
+        options: {
+          spawn: false
+        }
+      }
     }
   });
 
   grunt.loadNpmTasks('grunt-contrib-jasmine');
   grunt.loadNpmTasks('grunt-contrib-jshint');
+  grunt.loadNpmTasks('grunt-contrib-coffee');
+  grunt.loadNpmTasks('grunt-contrib-watch');
 
-  grunt.registerTask('default', ['jasmine', 'jshint']);
+  grunt.registerTask('default', ['coffee', 'jasmine', 'jshint']);
 };
