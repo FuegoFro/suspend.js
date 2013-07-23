@@ -3,7 +3,6 @@
   "version": "0.0.0",
   "devDependencies": {
     "grunt": "~0.4.1",
-    "grunt-contrib-jshint": "~0.5.2",
     "grunt-contrib-jasmine": "~0.4.2",
     "grunt-contrib-coffee": "~0.7.0",
     "grunt-contrib-watch": "~0.5.1"

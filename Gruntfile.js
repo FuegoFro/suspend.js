@@ -11,19 +11,9 @@ module.exports = function (grunt) {
         options: {
           specs: 'deist/evaluator.spec.js',
           vendor: [
-            'lib/esprima/esprima.js',
-            'https://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js'
+            'lib/esprima/esprima.js'
           ]
         }
-      }
-    },
-
-    jshint: {
-      gruntfile: {src: ['Gruntfile.js']},
-      spec: {src: ['evaluator.spec.js']},
-      src: {src: ['evaluator.js']},
-      options: {
-        jshintrc: '.jshintrc'
       }
     },
 
@@ -48,9 +38,8 @@ module.exports = function (grunt) {
   });
 
   grunt.loadNpmTasks('grunt-contrib-jasmine');
-  grunt.loadNpmTasks('grunt-contrib-jshint');
   grunt.loadNpmTasks('grunt-contrib-coffee');
   grunt.loadNpmTasks('grunt-contrib-watch');
 
-  grunt.registerTask('default', ['coffee', 'jasmine', 'jshint']);
+  grunt.registerTask('default', ['coffee', 'jasmine']);
 };
