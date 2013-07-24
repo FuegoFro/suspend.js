@@ -46,7 +46,7 @@ compileStatements = (statements) ->
     instructions = testBytecode.preInstructions
 
     # We know that the expression will always be a string
-    negatedCondition = "!(" + testBytecode.expression + ")"
+    negatedCondition = "!(#{testBytecode.expression})"
     loopTest = new If(negatedCondition, [new Break()], [])
     merge instructions, [loopTest]
 
@@ -119,10 +119,10 @@ compileStatements = (statements) ->
         merge loopInstructions, subStatements(statement.body)
         instructions.push new Loop(loopInstructions)
       when "DoWhileStatement"
-        loopInstructions = []
-        merge loopInstructions, subStatements(statement.body)
-        merge loopInstructions, makeLoopTest(statement.test)
-        instructions.push new Loop(loopInstructions)
+        bodyInstructions = subStatements(statement.body)
+        testInstructions = makeLoopTest(statement.test)
+        loopInstructions = testInstructions.concat bodyInstructions
+        instructions.push new Loop(loopInstructions, testInstructions.length)
       when "ForStatement"
 
         # Initializers
@@ -159,12 +159,9 @@ compileExpression = (expression, currentTemp) ->
     compiled.expression
 
   getTempVariable = ->
-    # Need this to be a reference so that
-    # incrementing it will affect parent calls
-    "$__temp__[" + (currentTemp.val++) + "]"
-#    compiled = undefined
-#    elements = undefined
-#    tempVar = undefined
+    # Need currentTemp to be a reference to an object so that
+    # incrementing it's value will affect parent/child calls
+    "$__temp__[#{currentTemp.val++}]"
   extraInstructions = []
   currentTemp = currentTemp or val: 0
   switch expression.type
@@ -176,7 +173,7 @@ compileExpression = (expression, currentTemp) ->
       compiled = expression.name
     when "ArrayExpression"
       elements = (subExpression(element) for element in expression.elements)
-      compiled = "[" + elements.join(", ") + "]"
+      compiled = "[#{elements.join(", ")}]"
     when "ObjectExpression"
       properties = []
       for property in expression.properties
@@ -200,7 +197,7 @@ compileExpression = (expression, currentTemp) ->
     when "BinaryExpression", "AssignmentExpression", "LogicalExpression"
       left = subExpression(expression.left)
       right = subExpression(expression.right)
-      compiled = "(" + left + " " + expression.operator + " " + right + ")"
+      compiled = "(#{left} #{expression.operator} #{right})"
     when "UpdateExpression"
       compiled = subExpression(expression.argument)
       if expression.prefix
@@ -211,16 +208,15 @@ compileExpression = (expression, currentTemp) ->
       test = subExpression(expression.test)
       consequent = subExpression(expression.consequent)
       alternate = subExpression(expression.alternate)
-      compiled = test + " ? " + consequent + " : " + alternate
+      compiled = "#{test} ? #{consequent} : #{alternate}"
     when "MemberExpression"
       property = subExpression(expression.property)
       object = subExpression(expression.object)
       if expression.computed
-        compiled = object + "[" + property + "]"
+        compiled = object + "[#{property}]"
       else
-
         # Access with dot notation, assuming property is an identifier
-        compiled = object + "." + property
+        compiled = "#{object}.#{property}"
 
     # falls through
     when "CallExpression", "NewExpression"
@@ -347,11 +343,13 @@ class Continue
 
 
 class Loop extends ControlObject
-  constructor: (instructions) ->
+  constructor: (instructions, initialPC) ->
     @instructions = instructions
     @instructions.push new Continue()
+    @initialPC = initialPC or 0
   updateState: (context) ->
     context.pushState @instructions, this
+    context.setPC(@initialPC)
   canContinue: -> true
   canBreak: -> true
 
@@ -382,7 +380,7 @@ class Context
     preWrap = ""
     postWrap = ""
     for i in [0...environment.length]
-      preWrap += "with($__env__[" + i + "]){"
+      preWrap += "with($__env__[#{i}]){"
       postWrap += "}"
 
     command = preWrap + command + postWrap
