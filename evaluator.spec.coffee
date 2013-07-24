@@ -1,7 +1,6 @@
 # Todo: Use custom jasmine matchers
 # Todo: Use the field names the parser uses
 # Todo: Possibly use a better statement matching format?
-# Todo: Convert everything to coffeescript
 describe "The evaluator module", ->
   evaluator = undefined
   beforeEach ->
@@ -93,10 +92,8 @@ describe "The evaluator module", ->
           "a in b", "'0' == false", # binary operators
           "foo = 12", "i += 4", # assignment expression
           "a++", "b--", "++c", "--d", # update operators
-          "true || false", "a && b || c", # logical operators
-          "useSpace ? ' ' : ''", "a && b ? 15 : 25", "a.b", # ternary expressions
           "foo[bar]", "arr[0]", "obj['key']", # membership access
-          "(1 + 2) * 3", "a && (b || c)", # order of operations
+          "(1 + 2) * 3", "a + (b = 2)", # order of operations
         ]
         for expression in original
           expressionExpectNoChange expression
@@ -167,9 +164,79 @@ describe "The evaluator module", ->
         expectFunctionCall bytecode.preInstructions[1], "outer", [t0], t1
         expect(bytecode.expression).toEqual t1
 
+      # Note that this relies on the If statement
+      it "desugars short circuiting logical expressions", ->
+        bytecode = getExpressionBytecode('a && b')
+        # This should desugar to:
+        #   temp = a
+        #   if (temp) temp = b
+        #   temp
+
+        temp = tempName(0)
+        expect(bytecode.preInstructions.length).toEqual 2
+        expectAstEqual bytecode.preInstructions[0], "#{temp} = a"
+        ifStatement = bytecode.preInstructions[1]
+        expect(ifStatement).toEqual jasmine.any(evaluator.If)
+        expectAstEqual ifStatement.condition, temp
+        expect(ifStatement.thenCase.length).toEqual 1
+        expectAstEqual ifStatement.thenCase[0], "#{temp} = b"
+        expect(ifStatement.elseCase).toEqual []
+
+        expect(bytecode.expression).toEqual temp
+
+        bytecode = getExpressionBytecode('f() || g()')
+        # This should desugar to:
+        #   temp1 = f()
+        #   temp0 = temp0
+        #   if (!temp0)
+        #     temp0 = g()
+        #     temp0 = temp0
+        #   temp0
+
+        t0 = tempName(0)
+        t1 = tempName(1)
+        expect(bytecode.preInstructions.length).toEqual 3
+        expectFunctionCall bytecode.preInstructions[0], 'f', [], t1
+        expectAstEqual bytecode.preInstructions[1], "#{t0} = #{t1}"
+        ifStatement = bytecode.preInstructions[2]
+        expect(ifStatement).toEqual jasmine.any(evaluator.If)
+        expectAstEqual ifStatement.condition, "!#{t0}"
+        expect(ifStatement.thenCase.length).toEqual 2
+        expectFunctionCall ifStatement.thenCase[0], 'g', [], t0
+        expectAstEqual ifStatement.thenCase[1], "#{t0} = #{t0}"
+        expect(ifStatement.elseCase).toEqual []
+
+        expect(bytecode.expression).toEqual t0
+
+      it "desugars ternary expressions", ->
+        bytecode = getExpressionBytecode('a() ? b() : c()')
+        # This should desugar to:
+        #   temp1 = a()
+        #   if (temp1)
+        #     temp0 = b()
+        #     temp0 = temp0
+        #   else
+        #     temp0 = c()
+        #     temp0 = temp0
+        #   temp0
+
+        t0 = tempName(0)
+        t1 = tempName(1)
+        expect(bytecode.preInstructions.length).toEqual 2
+        expectFunctionCall bytecode.preInstructions[0], 'a', [], t1
+        ifStatement = bytecode.preInstructions[1]
+        expect(ifStatement).toEqual jasmine.any(evaluator.If)
+        expectAstEqual ifStatement.condition, t1
+        expect(ifStatement.thenCase.length).toEqual 2
+        expectFunctionCall ifStatement.thenCase[0], 'b', [], t0
+        expectAstEqual ifStatement.thenCase[1], "#{t0} = #{t0}"
+        expect(ifStatement.elseCase.length).toEqual 2
+        expectFunctionCall ifStatement.elseCase[0], 'c', [], t0
+        expectAstEqual ifStatement.elseCase[1], "#{t0} = #{t0}"
+
+        expect(bytecode.expression).toEqual t0
 
     
-    # Todo: Make sure ternary operators don't evaluate both 'then' and 'else'
     # Todo: Parentheses for order of operations:
     #    new (foo()) ();
     describe "statement bytecode", ->
@@ -900,8 +967,29 @@ describe "The evaluator module", ->
       evaluator.eval "val = 2" # Default case
       expect(evaluator.eval(program)).toEqual 5
 
-    
-    # Todo: Make sure switch doesn't evaluate all case expressions, just the ones it gets to
+    it "short circuits logical expression", ->
+      program =
+        "a = 0;" +
+        "increment = function (val) {a++; return val};" +
+        "res = increment('') && increment('hi');" +
+        "[a, res];"
+      expect(evaluator.eval(program)).toEqual [1, '']
+
+      program =
+        "a = 0;" +
+        "increment = function (val) {a++; return val};" +
+        "res = increment('') && increment('hi') || increment('hello');" +
+        "[a, res];"
+      expect(evaluator.eval(program)).toEqual [2, "hello"]
+
+    it "short circuits ternary expressions", ->
+      program =
+        "obj = {a: 0, b: 0, c: 0};" +
+        "incr = function (val) {obj[val]++; return val;};" +
+        "res = incr('a') ? incr('b') : incr('c');" +
+        "[obj, res];"
+      expect(evaluator.eval(program)).toEqual [{a: 1, b: 1, c: 0}, 'b']
+
     it "can pause execution", ->
       pauseExecFunc = ->
         evaluator.pause()
@@ -960,4 +1048,4 @@ describe "The evaluator module", ->
 #    - entire result passing system needs to be callback based
 # Todo: Errors should clear the execution state/stack
 # Todo: Allow user defined functions to be called by native functions
-# Todo: Ensure short circuiting in logical operators, ternary statements, and switch statements works
+# Todo: Ensure short circuiting in switch statements works

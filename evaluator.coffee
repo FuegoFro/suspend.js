@@ -158,6 +158,10 @@ compileExpression = (expression, currentTemp) ->
     merge extraInstructions, compiled.preInstructions
     compiled.expression
 
+  statementsFromExpression = (toCompile, destination) ->
+    bytecode = compileExpression(toCompile)
+    return bytecode.preInstructions.concat ["#{destination} = #{bytecode.expression}"]
+
   getTempVariable = ->
     # Need currentTemp to be a reference to an object so that
     # incrementing it's value will affect parent/child calls
@@ -193,11 +197,20 @@ compileExpression = (expression, currentTemp) ->
       operator = expression.operator
       separator = (if operator.length > 1 then " " else "")
       compiled = operator + separator + subExpression(expression.argument)
-
-    when "BinaryExpression", "AssignmentExpression", "LogicalExpression"
+    when "BinaryExpression", "AssignmentExpression"
       left = subExpression(expression.left)
       right = subExpression(expression.right)
       compiled = "(#{left} #{expression.operator} #{right})"
+    when "LogicalExpression"
+      tempVar = getTempVariable()
+      extraInstructions.push("#{tempVar} = #{subExpression(expression.left)}")
+
+      ifPredicate = tempVar
+      ifPredicate = "!" + ifPredicate if expression.operator == "||"
+      ifInstructions = statementsFromExpression(expression.right, tempVar)
+      extraInstructions.push(new If(ifPredicate, ifInstructions, []))
+
+      compiled = tempVar
     when "UpdateExpression"
       compiled = subExpression(expression.argument)
       if expression.prefix
@@ -205,10 +218,14 @@ compileExpression = (expression, currentTemp) ->
       else
         compiled += expression.operator
     when "ConditionalExpression"
+      tempVar = getTempVariable()
+
       test = subExpression(expression.test)
-      consequent = subExpression(expression.consequent)
-      alternate = subExpression(expression.alternate)
-      compiled = "#{test} ? #{consequent} : #{alternate}"
+      thenInstructions = statementsFromExpression(expression.consequent, tempVar)
+      elseInstructions = statementsFromExpression(expression.alternate, tempVar)
+      extraInstructions.push(new If(test, thenInstructions, elseInstructions))
+
+      compiled = tempVar
     when "MemberExpression"
       property = subExpression(expression.property)
       object = subExpression(expression.object)
