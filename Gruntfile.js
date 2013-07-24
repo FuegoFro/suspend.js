@@ -9,7 +9,7 @@ module.exports = function (grunt) {
       dist: {
         src: 'dist/evaluator.compiled.js',
         options: {
-          specs: 'deist/evaluator.spec.js',
+          specs: 'dist/evaluator.spec.js',
           vendor: [
             'lib/esprima/esprima.js'
           ]
@@ -22,6 +22,19 @@ module.exports = function (grunt) {
         files: {
           'dist/evaluator.compiled.js': 'evaluator.coffee',
           'dist/evaluator.spec.js': 'evaluator.spec.coffee'
+        }
+      }
+    },
+
+    coffeelint: {
+      app: {
+        files:{
+          src: ['*.coffee']
+        },
+        options: {
+          max_line_length: {
+            value: 100
+          }
         }
       }
     },
@@ -40,6 +53,7 @@ module.exports = function (grunt) {
   grunt.loadNpmTasks('grunt-contrib-jasmine');
   grunt.loadNpmTasks('grunt-contrib-coffee');
   grunt.loadNpmTasks('grunt-contrib-watch');
+  grunt.loadNpmTasks('grunt-coffeelint');
 
-  grunt.registerTask('default', ['coffee', 'jasmine']);
+  grunt.registerTask('default', ['coffee', 'coffeelint', 'jasmine']);
 };
