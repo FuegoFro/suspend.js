@@ -778,13 +778,16 @@ describe "The evaluator module", ->
         ["testId", testId],
         ["[1, true, 'hi', testId]", [1, true, "hi", testId]],
         ["({a: 1})", a: 1 ],
-        ["({msg: 'hello', arr: [1,2,3], obj: {foo: 'bar'}})", msg: "hello", arr: [1, 2, 3], obj: {foo: "bar"}],
+        [
+          "({msg: 'hello', arr: [1,2,3], obj: {foo: 'bar'}})",
+          msg: "hello", arr: [1, 2, 3], obj: {foo: "bar"}
+        ],
         ["1, 2, 'red', 'blue'", `(1, 2, "red", "blue")`],
         ["-num", -5], # num = 5
         ["+5", 5],
         ["!'hey'", false],
         ["typeof testId", "object"],
-        ["void 'hi'", `undefined`],
+        ["void 'hi'", undefined],
         ["num in testId", false],
         ["'0' == false", true],
         ["foo = 12", 12],

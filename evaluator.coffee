@@ -22,7 +22,7 @@
 #*       - On resume, pick up where left off
 #*     ~ Handle promises returned by functions.
 #*
-#* 
+#*
 
 compileStatements = (statements) ->
   subExpression = (toCompile, currentTemp) ->
@@ -61,7 +61,8 @@ compileStatements = (statements) ->
         for declarator in statement.declarations
           name = subExpression(declarator.id)
           declaredVariables[name] = 1
-          instructions.push name + " = " + subExpression(declarator.init)  if declarator.init isnt null
+          if declarator.init isnt null
+            instructions.push "#{name} = #{subExpression(declarator.init)}"
 
       when "FunctionDeclaration"
         name = subExpression(statement.id)
@@ -264,10 +265,10 @@ compileExpression = (expression, currentTemp) ->
 
 
 class ControlBlock
-    updateState: ->
-    canBreak: -> false
-    canContinue: -> false
-    canReturn: -> false
+  updateState: ->
+  canBreak: -> false
+  canContinue: -> false
+  canReturn: -> false
 
 class Closure
   constructor: (func, env) ->
@@ -525,7 +526,7 @@ window.Evaluator = EvaluatorClass
 
 unless Array.isArray
   Array.isArray = (vArg) ->
-    Object.prototype.toString.call(vArg) is "[object Array]";
+    Object.prototype.toString.call(vArg) is "[object Array]"
 
 merge = (first, second) ->
   # Taken from jQuery
@@ -540,5 +541,5 @@ merge = (first, second) ->
     while second[j] != undefined
       first[i++] = second[j++]
 
-  first.length = i;
+  first.length = i
   return first
