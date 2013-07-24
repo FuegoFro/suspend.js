@@ -396,27 +396,74 @@ describe "The evaluator module", ->
         ]
 
       describe "creating Switch blocks", ->
-        it "flattens all cases into a single array of statements", ->
+        it "desugars case evaluation and flattens all statements", ->
           bytecode = getStatementsBytecode(
-            "switch (val) {" +
+            "switch (val()) {" +
             "case first:" +
             "  a = 2;" +
-            "  a++;" +
+            "  b(a);" +
             "case 'second':" +
             "  a = 5;" +
-            "  b(a);" +
+            "case third():" +
+            "  a++;" +
             "}"
           )
-          expect(bytecode.instructions.length).toEqual 1
-          switchStatement = bytecode.instructions[0]
+          # This should desugar to:
+          #   temp1 = val()
+          #   if temp1 == first
+          #     temp0 = 0 // instruction index at "case first:"
+          #   else
+          #     if temp1 == 'second'
+          #       temp0 = 3 // instruction index at "case 'second':"
+          #     else
+          #       temp2 = third()
+          #       if temp1 == temp2
+          #         temp0 = 4 // instruction index at "case third():"
+          #       else
+          #         temp0 = null // No default
+          #   switch (start at temp0)
+          #     a = 2 // case first
+          #     temp = b(a)
+          #     temp
+          #     a = 5 // case 'second'
+          #     a++ // case third()
+          t0 = tempName(0)
+          t1 = tempName(1)
+          t2 = tempName(2)
+          expect(bytecode.instructions.length).toEqual 3
+          expectFunctionCall bytecode.instructions[0], 'val', [], t1
+          firstLevel = bytecode.instructions[1]
+          expect(firstLevel).toEqual jasmine.any(evaluator.If)
+          expectAstEqual firstLevel.condition, "#{t1} == first"
+          expect(firstLevel.thenCase.length).toEqual 1
+          expectAstEqual firstLevel.thenCase[0], "#{t0} = 0"
+          expect(firstLevel.elseCase.length).toEqual 1
+
+          secondLevel = firstLevel.elseCase[0]
+          expect(secondLevel).toEqual jasmine.any(evaluator.If)
+          expectAstEqual secondLevel.condition, "#{t1} == 'second'"
+          expect(secondLevel.thenCase.length).toEqual 1
+          expectAstEqual secondLevel.thenCase[0], "#{t0} = 3"
+          expect(secondLevel.elseCase.length).toEqual 2
+          expectFunctionCall secondLevel.elseCase[0], 'third', [], t2
+
+          thirdLevel = secondLevel.elseCase[1]
+          expect(thirdLevel).toEqual jasmine.any(evaluator.If)
+          expectAstEqual thirdLevel.condition, "#{t1} == #{t2}"
+          expect(thirdLevel.thenCase.length).toEqual 1
+          expectAstEqual thirdLevel.thenCase[0], "#{t0} = 4"
+          expect(thirdLevel.elseCase.length).toEqual 1
+          expectAstEqual thirdLevel.elseCase[0], "#{t0} = null"
+
+          switchStatement = bytecode.instructions[2]
           expect(switchStatement).toEqual jasmine.any(evaluator.Switch)
-          expect(switchStatement.value).toEqual "val"
+          expect(switchStatement.startPCVar).toEqual t0
           inst = switchStatement.instructions
           expectAstEqual inst[0], "a = 2"
-          expectAstEqual inst[1], "a++"
-          expectAstEqual inst[2], "a = 5"
-          expectFunctionCall inst[3], "b", ["a"], tempName(0)
-          expectAstEqual inst[4], tempName(0)
+          expectFunctionCall inst[1], "b", ["a"], t0
+          expectAstEqual inst[2], t0
+          expectAstEqual inst[3], "a = 5"
+          expectAstEqual inst[4], "a++"
 
         it "has function scope", ->
           bytecode = getStatementsBytecode(
@@ -432,44 +479,13 @@ describe "The evaluator module", ->
           expect(bytecode.declaredFunctions.length).toEqual 1
           expectFunctionDef bytecode.declaredFunctions[0], "c", ["d"], "e", null
           inst = bytecode.instructions
-          expect(inst.length).toEqual 2
-          expectFunctionCall inst[0], "foo", [], tempName(0)
-          expect(inst[1]).toEqual jasmine.any(evaluator.Switch)
-          expect(inst[1].value).toEqual "#{tempName(0)}.val"
-
-        it "maps between cases wrapped in functions and index into the statements", ->
-          bytecode = getStatementsBytecode(
-            "switch (val) {" +
-            "case first:" +
-            "  a = 2;" +
-            "  a++;" +
-            "case 'second':" +
-            "case false:" +
-            "  a = 8;" +
-            "  a++;" +
-            "case foo():" +
-            "  a = 11;" +
-            "}"
-          )
-          expect(bytecode.instructions.length).toEqual 1
-          switchStatement = bytecode.instructions[0]
-          expectFunctionDef switchStatement.cases[0].test, null, [], "return first", null
-          expectFunctionDef switchStatement.cases[1].test, null, [], "return 'second'", null
-          expectFunctionDef switchStatement.cases[2].test, null, [], "return false", null
-          expectFunctionDef switchStatement.cases[3].test, null, [], "return foo()", null
-          expect(switchStatement.cases[0].index).toEqual 0
-          expect(switchStatement.cases[1].index).toEqual 2
-          expect(switchStatement.cases[2].index).toEqual 2
-          expect(switchStatement.cases[3].index).toEqual 4
+          expect(inst.length).toEqual 3
+          expectFunctionCall inst[0], "foo", [], tempName(1)
+          expect(inst[1]).toEqual jasmine.any(evaluator.If)
+          expect(inst[2]).toEqual jasmine.any(evaluator.Switch)
+          expect(inst[2].startPCVar).toEqual tempName(0)
 
         it "stores a default index", ->
-          bytecode = getStatementsBytecode(
-            "switch (val) {" +
-            "case 'foo':" +
-            "  a = 2;" +
-            "}"
-          )
-          expect(bytecode.instructions[0].default).toBeNull()
           bytecode = getStatementsBytecode(
             "switch (val) {" +
             "case 'foo':" +
@@ -480,8 +496,35 @@ describe "The evaluator module", ->
             "  a = 6;" +
             "}"
           )
-          expect(bytecode.instructions[0].default).toEqual 1
+          # This should desugar to:
+          #   if val == 'foo'
+          #     temp = 0 // instruction index of "case 'foo':"
+          #   else
+          #     if val == 'bar'
+          #       temp = 2 // instruction index of "case 'bar':"
+          #     else
+          #       temp = 1 // instruction index of "default"
+          #   switch (start at temp)....
+          temp = tempName(0)
+          expect(bytecode.instructions.length).toEqual 2
+          firstLevel = bytecode.instructions[0]
+          expect(firstLevel).toEqual jasmine.any(evaluator.If)
+          expectAstEqual firstLevel.condition, "val == 'foo'"
+          expect(firstLevel.thenCase.length).toEqual 1
+          expectAstEqual firstLevel.thenCase[0], "#{temp} = 0"
+          expect(firstLevel.elseCase.length).toEqual 1
 
+          secondLevel = firstLevel.elseCase[0]
+          expect(secondLevel).toEqual jasmine.any(evaluator.If)
+          expectAstEqual secondLevel.condition, "val == 'bar'"
+          expect(secondLevel.thenCase.length).toEqual 1
+          expectAstEqual secondLevel.thenCase[0], "#{temp} = 2"
+          expect(secondLevel.elseCase.length).toEqual 1
+          expectAstEqual secondLevel.elseCase[0], "#{temp} = 1"
+
+          switchStatement = bytecode.instructions[1]
+          expect(switchStatement).toEqual jasmine.any(evaluator.Switch)
+          expect(switchStatement.startPCVar).toEqual temp
 
       it "creates break statements", ->
         bytecode = getStatementsBytecode(
@@ -490,7 +533,7 @@ describe "The evaluator module", ->
           "  break;" +
           "}"
         )
-        switchStatement = bytecode.instructions[0]
+        switchStatement = bytecode.instructions[1]
         breakStatement = switchStatement.instructions[0]
         expect(breakStatement).toEqual jasmine.any(evaluator.Break)
 
@@ -923,9 +966,24 @@ describe "The evaluator module", ->
         "[firstRes, secondRes]"
       expect(evaluator.eval(program)).toEqual [[0, 1, 2, 3, 4], [0, 1, 2]]
 
-    
+    it "uses enclosing scopes for control blocks", ->
+      program =
+        "f = function (bool, secondBool) {" +
+        "  var a;" +
+        "  if (bool) {" +
+        "    a = 'first';" +
+        "  } else if (secondBool) {" +
+        "    a = 'second';" +
+        "  } else {" +
+        "    a = 'third';" +
+        "  }" +
+        "  return a;" +
+        "};" +
+        "[f(true, true), f(true, false), f(false, true), f(false, false)];"
+      expect(evaluator.eval(program)).toEqual ['first', 'first', 'second', 'third']
+
     # Todo: More scoping tests
-    xit "jumps to the correct case in a switch statement", ->
+    it "jumps to the correct case in a switch statement", ->
       program =
         "a = 0;" +
         "switch (val) {" +
@@ -948,7 +1006,7 @@ describe "The evaluator module", ->
       evaluator.eval "val = 3" # Does not match any case
       expect(evaluator.eval(program)).toEqual 0
 
-    xit "will use the default case in a switch if no other cases match", ->
+    it "will use the default case in a switch if no other cases match", ->
       program =
         "a = 0;" +
         "switch (val) {" +
@@ -966,6 +1024,35 @@ describe "The evaluator module", ->
       expect(evaluator.eval(program)).toEqual 3
       evaluator.eval "val = 2" # Default case
       expect(evaluator.eval(program)).toEqual 5
+
+    it "can continue and return from within switch statements", ->
+      program =
+        "f = function () {" +
+        "  var a = 0;" +
+        "  while (true) {" +
+        "    a++;" +
+        "    switch (a) {" +
+        "      case 1:" +
+        "        continue;" +
+        "      case 2:" +
+        "        return a;" +
+        "    }" +
+        "  }" +
+        "};" +
+        "f();"
+      expect(evaluator.eval(program)).toEqual 2
+
+    it "short circuits case expression evalution", ->
+      program =
+        "obj = {a: 0, b: 0, c: 0};" +
+        "incr = function (val) {obj[val]++; return val;};" +
+        "switch('b') {" +
+        "  case incr('a'):" +
+        "  case incr('b'):" +
+        "  case incr('c'):" +
+        "}" +
+        "obj"
+      expect(evaluator.eval(program)).toEqual a: 1, b: 1, c: 0
 
     it "short circuits logical expression", ->
       program =
@@ -1048,4 +1135,5 @@ describe "The evaluator module", ->
 #    - entire result passing system needs to be callback based
 # Todo: Errors should clear the execution state/stack
 # Todo: Allow user defined functions to be called by native functions
-# Todo: Ensure short circuiting in switch statements works
+# Todo: Test With block evaluation
+# Todo: Test object creation

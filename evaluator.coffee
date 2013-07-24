@@ -25,9 +25,9 @@
 #* 
 
 compileStatements = (statements) ->
-  subExpression = (toCompile) ->
+  subExpression = (toCompile, currentTemp) ->
     return null if toCompile is null
-    compiled = compileExpression(toCompile)
+    compiled = compileExpression(toCompile, currentTemp)
     merge instructions, compiled.preInstructions
     compiled.expression
 
@@ -91,28 +91,42 @@ compileStatements = (statements) ->
         body = subStatements(statement.body)
         instructions.push new With(object, body)
       when "SwitchStatement"
-        value = subExpression(statement.discriminant)
+        # Emulate temporary variable system used in expression compilation
+        startPCTemp = "$__temp__[0]"
+        currentTemp = val: 1
+        value = subExpression(statement.discriminant, currentTemp)
         subInstructions = []
         caseMappings = []
         defaultIndex = null
         for switchCase in statement.cases
           if switchCase.test isnt null
-            # Do not call subExpression, do not want instructions merged into
-            # current scope (before switch)
-            testBytecode = compileExpression(switchCase.test)
-            testInstructions = merge(testBytecode.preInstructions, [new Return(testBytecode.expression)])
-            body =
-              declaredFunctions: []
-              declaredVariables: []
-              instructions: testInstructions
             caseMappings.push
-              test: new FunctionDefinition(null, [], body)
+              test: switchCase.test
               index: subInstructions.length
           else
             defaultIndex = subInstructions.length
           merge subInstructions, subStatements(switchCase.consequent)
 
-        instructions.push new Switch(value, subInstructions, caseMappings, defaultIndex)
+        makeSwitchCaseIndexChooser = (reverseMappings) ->
+          # Returns an array of statements which are effectively an if/else if chain
+          if reverseMappings.length == 0
+            return ["#{startPCTemp} = #{defaultIndex}"]
+
+          switchCase = reverseMappings.pop()
+          caseIndexChooseInstructions = []
+          testBytecode = compileExpression(switchCase.test, currentTemp)
+          merge caseIndexChooseInstructions, testBytecode.preInstructions
+
+          predicate = "#{value} == #{testBytecode.expression}"
+          thenCase = ["#{startPCTemp} = #{switchCase.index}"]
+          elseCase = makeSwitchCaseIndexChooser(reverseMappings)
+          caseIndexChooseInstructions.push new If(predicate, thenCase, elseCase)
+          return caseIndexChooseInstructions
+
+        # Put if/else if's before the switch statement to choose which index to start at
+        merge instructions, makeSwitchCaseIndexChooser(caseMappings.reverse())
+        # Create the actual switch statement
+        instructions.push new Switch(startPCTemp, subInstructions)
       when "WhileStatement"
         loopInstructions = []
         merge loopInstructions, makeLoopTest(statement.test)
@@ -249,7 +263,7 @@ compileExpression = (expression, currentTemp) ->
   }
 
 
-class ControlObject
+class ControlBlock
     updateState: ->
     canBreak: -> false
     canContinue: -> false
@@ -320,7 +334,7 @@ class Return
     returner.handleReturn context, returnValue
 
 
-class If extends ControlObject
+class If extends ControlBlock
   constructor: (condition, thenClause, elseClause) ->
     @condition = condition
     @thenCase = thenClause
@@ -336,12 +350,18 @@ class With
     @body = body
 
 
-class Switch
-  constructor: (value, instructions, cases, defaultIndex) ->
-    @value = value
+class Switch extends ControlBlock
+  constructor: (startPCVar, instructions) ->
+    @startPCVar = startPCVar
     @instructions = instructions
-    @cases = cases
-    @default = defaultIndex or null
+  updateState: (context) ->
+    startPC = context.eval @startPCVar
+    # If startPC is null, there is no default and the discriminant did not
+    # match any of the cases.
+    if startPC != null
+      context.pushState @instructions, this
+      context.setPC startPC
+  canBreak: -> true
 
 class Break
   updateState: (context) ->
@@ -359,7 +379,7 @@ class Continue
     context.setPC 0
 
 
-class Loop extends ControlObject
+class Loop extends ControlBlock
   constructor: (instructions, initialPC) ->
     @instructions = instructions
     @instructions.push new Continue()
@@ -408,8 +428,7 @@ class Context
       instructions: instructions
       pc: 0
       controlObject: controlObject or null
-      environment: environment or []
-
+      environment: environment or @getEnvironment()
 
   popState: ->
     @state.pop()
