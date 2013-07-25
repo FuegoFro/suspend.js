@@ -275,17 +275,19 @@ class Closure
     @function = func
     @environment = env
 
-  getInstructions: -> @function.body.instructions
+  getInstructions: ->
+    @function.body.declaredFunctions.concat @function.body.instructions
 
   getEnvironment: (args) ->
     newEnvironmentFrame = {}
     for variable in @function.body.declaredVariables
       newEnvironmentFrame[variable] = undefined
+    for func in @function.body.declaredFunctions
+      newEnvironmentFrame[func.name] = undefined
     for param, i in @function.params
       newEnvironmentFrame[param] = args[i]
     return @environment.concat [newEnvironmentFrame]
 
-# Todo: Make defined functions work
 class FunctionDefinition
   constructor: (name, params, body, tempVar) ->
     @name = name
@@ -294,7 +296,8 @@ class FunctionDefinition
     @tempVar = tempVar or null
 
   updateState: (context) ->
-    context.setValue @tempVar, new Closure(this, context.getEnvironment())
+    targetLocation = @tempVar or @name
+    context.setValue targetLocation, new Closure(this, context.getEnvironment())
 
 class FunctionCall
   constructor: (callee, args, tempVar) ->
@@ -394,7 +397,7 @@ class Loop extends ControlBlock
 ###
 Context class, contains the execution context and wrappers to interact
 with the various elements of the execution context. An execution context
-is comprised of a series of states, accessed in a first-in-first-out order,
+is comprised of a series of states, accessed in a first-in-last-out order,
 or in other words, a stack of states. Each state consists of a list of
 instructions, a program counter (pc) which is the index of the next
 instruction, a control object, which is the control structure that is
@@ -483,7 +486,8 @@ class EvaluatorClass
     @isRunning = true
     ast = esprima.parse(string).body
     bytecode = compileStatements(ast)
-    @context.pushState bytecode.instructions
+    instructions = bytecode.declaredFunctions.concat bytecode.instructions
+    @context.pushState instructions
     @execute()
 
   execute: ->

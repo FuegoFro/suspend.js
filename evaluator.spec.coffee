@@ -59,7 +59,7 @@ describe "The evaluator module", ->
             message = "Expected function to have params #{params}, " +
             "instead had params #{@actual.params}"
           else unless @actual.tempVar == tempVar
-            message = "Expected function to stored in variable #{tempVar}, " +
+            message = "Expected function to be stored in variable #{tempVar}, " +
             "instead stored in #{@actual.tempVar}"
           else
             functionBytecode = getExpressionBytecode("(function () {#{body}})")
@@ -996,6 +996,24 @@ describe "The evaluator module", ->
         "[f(true, true), f(true, false), f(false, true), f(false, false)];"
       expect(evaluator.eval(program)).toEqual ['first', 'first', 'second', 'third']
 
+    it "defines declared functions at the beginning of the scope", ->
+      program =
+        "function f() {return 1;}" +
+        "a = f;" +
+        "function f() {return 2;}" +
+        "[a === f, a(), f()];"
+      expect(evaluator.eval(program)).toEqual [true, 2, 2]
+
+    it "defines declared functions locally within other functions", ->
+      program =
+        "a = 0;" +
+        "function f() {" +
+        "  return a();" +
+        "  function a() {return 1;}" +
+        "}" +
+        "[a, f()];"
+      expect(evaluator.eval(program)).toEqual [0, 1]
+
     # Todo: More scoping tests
     it "jumps to the correct case in a switch statement", ->
       program =
@@ -1038,6 +1056,16 @@ describe "The evaluator module", ->
       expect(evaluator.eval(program)).toEqual 3
       evaluator.eval "val = 2" # Default case
       expect(evaluator.eval(program)).toEqual 5
+
+    it "handles switch blocks with only a default case", ->
+      program =
+        "a = 0;" +
+        "switch (0) {" +
+        " default:" +
+        "   a++;" +
+        "}" +
+        "a;"
+      expect(evaluator.eval(program)).toEqual 1
 
     it "can continue and return from within switch statements", ->
       program =
@@ -1091,6 +1119,23 @@ describe "The evaluator module", ->
         "[obj, res];"
       expect(evaluator.eval(program)).toEqual [{a: 1, b: 1, c: 0}, 'b']
 
+    it "can delete variables in a scope", ->
+      program =
+        "a = 0;" +
+        "f = function () {" +
+        "  var arr = [];" +
+        "  var a = 4;" +
+        "  arr.push(a);" +
+        "  delete a;" +
+        "  arr.push(a);" +
+        "  arr.push('a' in window);" +
+        "  delete a;" +
+        "  arr.push('a' in window);" +
+        "  return arr;" +
+        "};" +
+        "f();"
+      expect(evaluator.eval(program)).toEqual [4, 0, true, false]
+
     it "can pause execution", ->
       pauseExecFunc = ->
         evaluator.pause()
@@ -1139,10 +1184,8 @@ describe "The evaluator module", ->
 #    Also need to handle everything defined on Function.prototype
 #      (eg call, apply, toString).
 # Todo: Don't allow eval or eval-like functionality
-# Todo: Test delete with scoping
 # Todo: Make sure 'this' and 'arguments' work
-# Todo: Make sure all 'hidden' variables are defined/work
-# Todo: Make sure declared functions work
+# Todo: Make sure all 'hidden' variables are defined/work (eg $__temp__ array)
 # Todo: Test when a function's name is re-defined within the function
 # Todo: 'var' statements should evaluate to undefined
 # Todo: After resuming, errors need to bubble up
