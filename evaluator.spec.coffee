@@ -762,7 +762,9 @@ describe "The evaluator module", ->
           evaluator.eval @actual, (res) ->
             evaluated = true
             result = res
-          @message = => "Expected #{@actual} to evaluate to #{expected}"
+          @message = =>
+            "Expected #{@actual} to evaluate to #{jasmine.pp(expected)}, " +
+            "actually evaluated to #{jasmine.pp(result)}"
           evaluated and @env.equals_ result, expected
 
     it "uses its context to evaluate non-function expressions", ->
@@ -1159,6 +1161,39 @@ describe "The evaluator module", ->
         "[bar() === bar, fooExists];"
       expect(program).toEvaluateTo [true, false]
 
+    it "extends the environment in With blocks", ->
+      program =
+        "myenv = {a: 1, b: 2};" +
+        "b = 6;" +
+        "f = function (env) {" +
+        "  var a = 5;" +
+        "  with (env) {" +
+        "    env = {};" +
+        "    a = 10;" +
+        "    b = 20;" +
+        "  }" +
+        "  return [a, b];" +
+        "};" +
+        "[f(myenv), myenv];"
+      expect(program).toEvaluateTo [[5, 6], {a: 10, b: 20}]
+
+    it "can continue, break and return inside with blocks", ->
+      program =
+        "f = function () {" +
+        "  var a = -1;" +
+        "  e = {a: 0};" +
+        "  while (true) {" +
+        "    e.a++;" +
+        "    with (e) {" +
+        "      if (a == 1) continue;" +
+        "      if (a == 2) break;" +
+        "    }" +
+        "  }" +
+        "  with (e) return a;" +
+        "};" +
+        "f();"
+      expect(program).toEvaluateTo 2
+
     it "can pause execution", ->
       evaluator.scope.pauseExecFunc = ->
         evaluator.pause()
@@ -1280,7 +1315,6 @@ describe "The evaluator module", ->
 # Todo: After resuming, errors need to bubble up
 # Todo: Errors should clear the execution state/stack
 # Todo: Allow user defined functions to be called by native functions
-# Todo: Test With block evaluation
 # Todo: Test object creation
 # Todo: More scoping tests
 # Todo: Flush out documentation

@@ -353,11 +353,14 @@ class If extends ControlBlock
     instructions = (if context.eval(@condition) then @thenCase else @elseCase)
     context.pushState instructions, this
 
-class With
+class With extends ControlBlock
   constructor: (object, body) ->
     @object = object
     @body = body
-
+  updateState: (context) ->
+    environmentFrame = context.eval @object
+    newEnvironment = context.getEnvironment().concat [environmentFrame]
+    context.pushState @body, this, newEnvironment
 
 class Switch extends ControlBlock
   constructor: (startPCVar, instructions) ->
