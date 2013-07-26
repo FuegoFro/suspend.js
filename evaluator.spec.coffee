@@ -1160,12 +1160,21 @@ describe "The evaluator module", ->
       expect(program).toEvaluateTo [true, false]
 
     it "can pause execution", ->
-      pauseExecFunc = ->
+      evaluator.scope.pauseExecFunc = ->
         evaluator.pause()
+      program =
+        "pauseExecFunc();" +
+        "5;"
+      callback = jasmine.createSpy()
+      evaluator.eval program, callback
+      expect(callback).not.toHaveBeenCalled()
 
-      myObject = val: 0
-      evaluator.scope.pauseExecFunc = pauseExecFunc
-      evaluator.scope.myObject = myObject
+    it "requires a context to resume execution", ->
+      context = null
+      evaluator.scope.pauseExecFunc = ->
+        context = evaluator.pause()
+
+      evaluator.scope.myObject = myObject = val: 0
       program =
         "f = function () {" +
         "  myObject.val = 1;" +
@@ -1177,14 +1186,76 @@ describe "The evaluator module", ->
         "myObject.val = 3;"
       evaluator.eval program
       expect(myObject.val).toEqual 1
-      evaluator.resume()
+
+      errorMessage = "Resuming evaluation requires a context as returned by pause."
+      expect(-> evaluator.resume()).toThrow(errorMessage)
+      expect(myObject.val).toEqual 1
+
+      evaluator.resume(context)
       expect(myObject.val).toEqual 2
-      evaluator.resume()
+
+      expect(-> evaluator.resume({})).toThrow("Invalid context given to resume.")
+      expect(myObject.val).toEqual 2
+
+      evaluator.resume(context)
       expect(myObject.val).toEqual 3
 
-    it "calls the onComplete function even after pausing and resuming", ->
+    it "can resume into different contexts", ->
+      context = null
       evaluator.scope.pauseExecFunc = ->
-        evaluator.pause()
+        context = evaluator.pause()
+
+      evaluator.scope.obj1 = obj1 = val: 0
+      evaluator.scope.obj2 = obj2 = val: 0
+      program1 =
+        "f = function () {" +
+        "  obj1.val = 1;" +
+        "  pauseExecFunc();" +
+        "  obj1.val = 2;" +
+        "};" +
+        "f();" +
+        "pauseExecFunc();" +
+        "obj1.val = 3;"
+      program2 =
+        "f = function () {" +
+        "  obj2.val = 1;" +
+        "  pauseExecFunc();" +
+        "  obj2.val = 2;" +
+        "};" +
+        "f();" +
+        "pauseExecFunc();" +
+        "obj2.val = 3;"
+
+      evaluator.eval program1
+      context1 = context
+      expect(obj1.val).toEqual 1
+      expect(obj2.val).toEqual 0
+
+      evaluator.eval program2
+      context2 = context
+      expect(obj1.val).toEqual 1
+      expect(obj2.val).toEqual 1
+
+      evaluator.resume(context2)
+      expect(obj1.val).toEqual 1
+      expect(obj2.val).toEqual 2
+
+      evaluator.resume(context1)
+      expect(obj1.val).toEqual 2
+      expect(obj2.val).toEqual 2
+
+      evaluator.resume(context1)
+      expect(obj1.val).toEqual 3
+      expect(obj2.val).toEqual 2
+
+      evaluator.resume(context2)
+      expect(obj1.val).toEqual 3
+      expect(obj2.val).toEqual 3
+
+    it "calls the onComplete function even after pausing and resuming", ->
+      context = null
+      evaluator.scope.pauseExecFunc = ->
+        context = evaluator.pause()
 
       program =
         "pauseExecFunc();" +
@@ -1193,7 +1264,7 @@ describe "The evaluator module", ->
 
       evaluator.eval program, doneCallback
       expect(doneCallback).not.toHaveBeenCalled()
-      evaluator.resume()
+      evaluator.resume(context)
       expect(doneCallback).toHaveBeenCalledWith "foobar"
 
 # Todo: Handle creation of proper prototype chains on functions
@@ -1222,4 +1293,3 @@ describe "The evaluator module", ->
 # Todo: Object getter and setter literals
 # Todo: Use the field names the parser uses
 # Todo: Possibly use a better statement matching format?
-# Todo: Pause should return a context and resume should need to take that context

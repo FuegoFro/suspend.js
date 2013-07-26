@@ -492,7 +492,7 @@ class Evaluator
 
   ###
   Takes in the string of the code to be evaluated and a callback that is called
-  with the result of the evaluation (an arbitrary Javascript value). 
+  with the result of the evaluation (an arbitrary Javascript value).
   ###
   eval: (string, onComplete) ->
     @isRunning = true
@@ -518,8 +518,14 @@ class Evaluator
 
   pause: ->
     @isRunning = false
+    @context
 
-  resume: ->
+  resume: (context) ->
+    unless context
+      throw new Error("Resuming evaluation requires a context as returned by pause.")
+    else unless context instanceof Context
+      throw new Error("Invalid context given to resume.")
+    @context = context
     @isRunning = true
     @execute()
 
