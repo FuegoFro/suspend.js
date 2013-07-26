@@ -4,23 +4,23 @@ describe "The evaluator module", ->
     evaluator = new Evaluator()
 
   afterEach ->
-    iframe = evaluator.context.scope.frameElement
+    iframe = evaluator.scope.frameElement
     iframe.parentElement.removeChild iframe
 
   it "creates an iframe to evaluate code in", ->
-    iframe = evaluator.context.scope.frameElement
+    iframe = evaluator.scope.frameElement
     
     # Need to test against both the global iframe and the iframe's iframe as
     # a workaround for PhantomJS. Really, we just care that it's an iframe.
     isIFrame = iframe instanceof HTMLIFrameElement or
-               iframe instanceof evaluator.context.scope.HTMLIFrameElement
+               iframe instanceof evaluator.scope.HTMLIFrameElement
     expect(isIFrame).toBe true
     expect(iframe.height).toEqual "0"
     expect(iframe.width).toEqual "0"
     expect(iframe.style.visibility).toEqual "hidden"
 
   it "creates a temporary variable array in the global scope", ->
-    expect(evaluator.context.eval("$__temp__")).toEqual []
+    expect(evaluator.scope["$__temp__"]).toEqual []
 
   describe "when compiling", ->
     beforeEach ->
@@ -754,6 +754,17 @@ describe "The evaluator module", ->
           expect(forLoop.instructions[1]).toEqual jasmine.any(Evaluator.Continue)
 
   describe "when interpreting bytecode", ->
+    beforeEach ->
+      @addMatchers
+        toEvaluateTo: (expected) ->
+          evaluated = false
+          result = null
+          evaluator.eval @actual, (res) ->
+            evaluated = true
+            result = res
+          @message = => "Expected #{@actual} to evaluate to #{expected}"
+          evaluated and @env.equals_ result, expected
+
     it "uses its context to evaluate non-function expressions", ->
       num = 5
       testId =
@@ -762,8 +773,8 @@ describe "The evaluator module", ->
         0: "zero value"
         9: "num value"
 
-      evaluator.context.setValue "num", num
-      evaluator.context.setValue "testId", testId
+      evaluator.scope.num = num
+      evaluator.scope.testId = testId
       
       # each line may rely on the previous line
       expressions = [
@@ -803,11 +814,8 @@ describe "The evaluator module", ->
         ["false && (true || true)", false]
       ]
       for pair in expressions
-        inputString = pair[0]
-        outputValue = pair[1]
-        evaluated = evaluator.eval(inputString)
-        expect(evaluated).toEqual outputValue
-
+        [inputString, outputValue] = pair
+        expect(inputString).toEvaluateTo outputValue
 
     it "conditionally executes code in If blocks", ->
       program =
@@ -819,9 +827,9 @@ describe "The evaluator module", ->
         "}" +
         "a;"
       evaluator.eval "val = true"
-      expect(evaluator.eval(program)).toEqual 1
+      expect(program).toEvaluateTo 1
       evaluator.eval "val = false"
-      expect(evaluator.eval(program)).toEqual 2
+      expect(program).toEvaluateTo 2
 
     it "can break out of loops", ->
       program =
@@ -831,7 +839,7 @@ describe "The evaluator module", ->
         "  a = 1;" +
         "}" +
         "a;"
-      expect(evaluator.eval(program)).toEqual 0
+      expect(program).toEvaluateTo 0
 
     it "can break out of nested blocks", ->
       program =
@@ -841,7 +849,7 @@ describe "The evaluator module", ->
         "  a = 1;" +
         "}" +
         "a;"
-      expect(evaluator.eval(program)).toEqual 0
+      expect(program).toEvaluateTo 0
       program =
         "a = 0;" +
         "do {" +
@@ -852,7 +860,7 @@ describe "The evaluator module", ->
         "  a += 2" +
         "} while (false)" +
         "a;"
-      expect(evaluator.eval(program)).toEqual 2
+      expect(program).toEvaluateTo 2
 
     it "can continue in loops", ->
       program =
@@ -864,7 +872,7 @@ describe "The evaluator module", ->
         "  a = 5;" +
         "}" +
         "a;"
-      expect(evaluator.eval(program)).toEqual 1
+      expect(program).toEvaluateTo 1
 
     it "can continue in nested blocks", ->
       program =
@@ -876,7 +884,7 @@ describe "The evaluator module", ->
         "  a = 5;" +
         "}" +
         "a;"
-      expect(evaluator.eval(program)).toEqual 1
+      expect(program).toEvaluateTo 1
 
     it "repeats loops normally", ->
       program =
@@ -885,14 +893,14 @@ describe "The evaluator module", ->
         "  a++;" +
         "}" +
         "a;"
-      expect(evaluator.eval(program)).toEqual 3
+      expect(program).toEvaluateTo 3
       program =
         "arr = [1,2,3];" +
         "for (i = 0; i < arr.length; i++) {" +
         "  arr[i] *= arr[i];" +
         "}" +
         "arr;"
-      expect(evaluator.eval(program)).toEqual [1, 4, 9]
+      expect(program).toEvaluateTo [1, 4, 9]
 
     it "checks the predicate when continuing in Do While loops", ->
       program =
@@ -903,12 +911,12 @@ describe "The evaluator module", ->
         "  continue;" +
         "} while (false)" +
         "a"
-      expect(evaluator.eval(program)).toEqual 1
+      expect(program).toEvaluateTo 1
 
     it "will call native functions", ->
       myNativeFunc = jasmine.createSpy().andReturn(12)
-      evaluator.context.setValue "myNativeFunc", myNativeFunc
-      expect(evaluator.eval("myNativeFunc('hi', false)")).toEqual 12
+      evaluator.scope.myNativeFunc = myNativeFunc
+      expect("myNativeFunc('hi', false)").toEvaluateTo 12
       expect(myNativeFunc).toHaveBeenCalledWith "hi", false
 
     it "can define and call user functions", ->
@@ -919,7 +927,7 @@ describe "The evaluator module", ->
         "};" +
         "f();" +
         "o;"
-      expect(evaluator.eval(program)).toEqual foo: 2
+      expect(program).toEvaluateTo foo: 2
 
     it "uses function scope when calling functions", ->
       program =
@@ -934,7 +942,7 @@ describe "The evaluator module", ->
         "f(4);" +
         "[a, b, c];"
       evaluator.eval "val = 3"
-      expect(evaluator.eval(program)).toEqual [1, 2, 11]
+      expect(program).toEvaluateTo [1, 2, 11]
 
     it "can return values", ->
       program =
@@ -942,7 +950,7 @@ describe "The evaluator module", ->
         "  return val + 1;" +
         "};" +
         "increment(5);"
-      expect(evaluator.eval(program)).toEqual 6
+      expect(program).toEvaluateTo 6
 
     it "handles nested functions and has closures", ->
       program =
@@ -965,7 +973,7 @@ describe "The evaluator module", ->
         "firstRes.push(firstCounter());" +
         "firstRes.push(firstCounter());" +
         "[firstRes, secondRes]"
-      expect(evaluator.eval(program)).toEqual [[0, 1, 2, 3, 4], [0, 1, 2]]
+      expect(program).toEvaluateTo [[0, 1, 2, 3, 4], [0, 1, 2]]
 
     it "uses enclosing scopes for control blocks", ->
       program =
@@ -981,7 +989,7 @@ describe "The evaluator module", ->
         "  return a;" +
         "};" +
         "[f(true, true), f(true, false), f(false, true), f(false, false)];"
-      expect(evaluator.eval(program)).toEqual ['first', 'first', 'second', 'third']
+      expect(program).toEvaluateTo ['first', 'first', 'second', 'third']
 
     it "defines declared functions at the beginning of the scope", ->
       program =
@@ -989,7 +997,7 @@ describe "The evaluator module", ->
         "a = f;" +
         "function f() {return 2;}" +
         "[a === f, a(), f()];"
-      expect(evaluator.eval(program)).toEqual [true, 2, 2]
+      expect(program).toEvaluateTo [true, 2, 2]
 
     it "defines declared functions locally within other functions", ->
       program =
@@ -999,7 +1007,7 @@ describe "The evaluator module", ->
         "  function a() {return 1;}" +
         "}" +
         "[a, f()];"
-      expect(evaluator.eval(program)).toEqual [0, 1]
+      expect(program).toEvaluateTo [0, 1]
 
     it "jumps to the correct case in a switch statement", ->
       program =
@@ -1016,13 +1024,13 @@ describe "The evaluator module", ->
         "}" +
         "a;"
       evaluator.eval "val = 0"
-      expect(evaluator.eval(program)).toEqual 1
+      expect(program).toEvaluateTo 1
       evaluator.eval "val = 1"
-      expect(evaluator.eval(program)).toEqual 5
+      expect(program).toEvaluateTo 5
       evaluator.eval "val = 2"
-      expect(evaluator.eval(program)).toEqual 3
+      expect(program).toEvaluateTo 3
       evaluator.eval "val = 3" # Does not match any case
-      expect(evaluator.eval(program)).toEqual 0
+      expect(program).toEvaluateTo 0
 
     it "will use the default case in a switch if no other cases match", ->
       program =
@@ -1037,11 +1045,11 @@ describe "The evaluator module", ->
         "}" +
         "a;"
       evaluator.eval "val = 0"
-      expect(evaluator.eval(program)).toEqual 6
+      expect(program).toEvaluateTo 6
       evaluator.eval "val = 1"
-      expect(evaluator.eval(program)).toEqual 3
+      expect(program).toEvaluateTo 3
       evaluator.eval "val = 2" # Default case
-      expect(evaluator.eval(program)).toEqual 5
+      expect(program).toEvaluateTo 5
 
     it "handles switch blocks with only a default case", ->
       program =
@@ -1051,7 +1059,7 @@ describe "The evaluator module", ->
         "   a++;" +
         "}" +
         "a;"
-      expect(evaluator.eval(program)).toEqual 1
+      expect(program).toEvaluateTo 1
 
     it "can continue and return from within switch statements", ->
       program =
@@ -1068,7 +1076,7 @@ describe "The evaluator module", ->
         "  }" +
         "};" +
         "f();"
-      expect(evaluator.eval(program)).toEqual 2
+      expect(program).toEvaluateTo 2
 
     it "short circuits case expression evalution", ->
       program =
@@ -1080,7 +1088,7 @@ describe "The evaluator module", ->
         "  case incr('c'):" +
         "}" +
         "obj"
-      expect(evaluator.eval(program)).toEqual a: 1, b: 1, c: 0
+      expect(program).toEvaluateTo a: 1, b: 1, c: 0
 
     it "short circuits logical expression", ->
       program =
@@ -1088,14 +1096,14 @@ describe "The evaluator module", ->
         "increment = function (val) {a++; return val};" +
         "res = increment('') && increment('hi');" +
         "[a, res];"
-      expect(evaluator.eval(program)).toEqual [1, '']
+      expect(program).toEvaluateTo [1, '']
 
       program =
         "a = 0;" +
         "increment = function (val) {a++; return val};" +
         "res = increment('') && increment('hi') || increment('hello');" +
         "[a, res];"
-      expect(evaluator.eval(program)).toEqual [2, "hello"]
+      expect(program).toEvaluateTo [2, "hello"]
 
     it "short circuits ternary expressions", ->
       program =
@@ -1103,7 +1111,7 @@ describe "The evaluator module", ->
         "incr = function (val) {obj[val]++; return val;};" +
         "res = incr('a') ? incr('b') : incr('c');" +
         "[obj, res];"
-      expect(evaluator.eval(program)).toEqual [{a: 1, b: 1, c: 0}, 'b']
+      expect(program).toEvaluateTo [{a: 1, b: 1, c: 0}, 'b']
 
     it "can delete variables in a scope", ->
       program =
@@ -1120,7 +1128,7 @@ describe "The evaluator module", ->
         "  return arr;" +
         "};" +
         "f();"
-      expect(evaluator.eval(program)).toEqual [4, 0, true, false]
+      expect(program).toEvaluateTo [4, 0, true, false]
 
     it "prevents over writing of in use temporary variables", ->
       program =
@@ -1128,7 +1136,7 @@ describe "The evaluator module", ->
         "  return [Boolean(first), Boolean(second)];" +
         "}" +
         "[makeBools(0, '0'), makeBools('null', null)];"
-      expect(evaluator.eval(program)).toEqual [[false, true], [true, false]]
+      expect(program).toEvaluateTo [[false, true], [true, false]]
 
     it "sets the function's name as a variable that points to the function inside " +
        "named function expressions", ->
@@ -1141,7 +1149,7 @@ describe "The evaluator module", ->
         "a = foo;" +
         "foo = 1;" +
         "a();"
-      expect(evaluator.eval(program)).toEqual 1
+      expect(program).toEvaluateTo 1
 
       program =
         "delete foo;" + # Get rid of it from previous tests
@@ -1149,15 +1157,15 @@ describe "The evaluator module", ->
         "fooExists = 'foo' in window;" +
         "foo = 1;" +
         "[bar() === bar, fooExists];"
-      expect(evaluator.eval(program)).toEqual [true, false]
+      expect(program).toEvaluateTo [true, false]
 
     it "can pause execution", ->
       pauseExecFunc = ->
         evaluator.pause()
 
       myObject = val: 0
-      evaluator.context.setValue "pauseExecFunc", pauseExecFunc
-      evaluator.context.setValue "myObject", myObject
+      evaluator.scope.pauseExecFunc = pauseExecFunc
+      evaluator.scope.myObject = myObject
       program =
         "f = function () {" +
         "  myObject.val = 1;" +
@@ -1174,6 +1182,20 @@ describe "The evaluator module", ->
       evaluator.resume()
       expect(myObject.val).toEqual 3
 
+    it "calls the onComplete function even after pausing and resuming", ->
+      evaluator.scope.pauseExecFunc = ->
+        evaluator.pause()
+
+      program =
+        "pauseExecFunc();" +
+        "'foobar';"
+      doneCallback = jasmine.createSpy()
+
+      evaluator.eval program, doneCallback
+      expect(doneCallback).not.toHaveBeenCalled()
+      evaluator.resume()
+      expect(doneCallback).toHaveBeenCalledWith "foobar"
+
 # Todo: Handle creation of proper prototype chains on functions
 # Todo: Test 'new' object creation calling Object.create ourselves and then
 #   calling the constructor with the created object as the 'this' parameter.
@@ -1185,14 +1207,12 @@ describe "The evaluator module", ->
 # Todo: Make sure 'this' and 'arguments' work
 # Todo: 'var' statements should evaluate to undefined
 # Todo: After resuming, errors need to bubble up
-#   - entire result passing system needs to be callback based
 # Todo: Errors should clear the execution state/stack
 # Todo: Allow user defined functions to be called by native functions
 # Todo: Test With block evaluation
 # Todo: Test object creation
 # Todo: More scoping tests
 # Todo: Flush out documentation
-# Todo: Handle labelled continues and breaks
 # Todo: Handle try, throw, catch
 # Todo: Handle For ... In loops
 # Todo: Handle object getters and setters
@@ -1202,3 +1222,4 @@ describe "The evaluator module", ->
 # Todo: Object getter and setter literals
 # Todo: Use the field names the parser uses
 # Todo: Possibly use a better statement matching format?
+# Todo: Pause should return a context and resume should need to take that context

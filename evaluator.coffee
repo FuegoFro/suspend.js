@@ -415,9 +415,9 @@ object, which has an eval function that can be used to evaluate code in a
 sandboxed fashion.
 ###
 class Context
-  constructor: (scope) ->
-    @scope = scope
+  constructor: (@scope, @onComplete) ->
     @stateStack = []
+    @lastResult = undefined
 
   eval: (command) ->
     # Wrap command in 'with' blocks for scoping
@@ -431,6 +431,9 @@ class Context
 
     command = preWrap + command + postWrap
     @scope.eval command
+
+  done: ->
+    @onComplete?(@lastResult)
 
   pushState: (instructions, controlObject, environment) ->
     @stateStack.push
@@ -451,7 +454,7 @@ class Context
       controlObject: null
       environment: []
 
-  hasMoreInstructions: ->
+  stateHasMoreInstructions: ->
     currentState = @getCurrentState()
     currentState.instructions.length > currentState.pc
 
@@ -461,8 +464,8 @@ class Context
     currentState.pc++
     instruction
 
-  finishedExecution: ->
-    @stateStack.length is 0
+  hasMoreStates: ->
+    @stateStack.length isnt 0
 
   getControlObject: ->
     @getCurrentState().controlObject
@@ -483,32 +486,35 @@ class Evaluator
     iframe.height = iframe.width = 0
     iframe.style["visibility"] = "hidden"
     document.body.appendChild(iframe)
-    @context = new Context(iframe.contentWindow)
-    iframe.contentWindow["$__temp__"] = []
+    @scope = iframe.contentWindow
+    @scope["$__temp__"] = []
 
 
-  eval: (string) ->
+  ###
+  Takes in the string of the code to be evaluated and a callback that is called
+  with the result of the evaluation (an arbitrary Javascript value). 
+  ###
+  eval: (string, onComplete) ->
     @isRunning = true
     ast = esprima.parse(string).body
     bytecode = compileStatements(ast)
     instructions = bytecode.declaredFunctions.concat bytecode.instructions
+    @context = new Context(@scope, onComplete)
     @context.pushState instructions
     @execute()
 
   execute: ->
-    instruction = undefined
-    lastResult = undefined
-    until @context.finishedExecution()
-      while @context.hasMoreInstructions()
+    while @context.hasMoreStates()
+      while @context.stateHasMoreInstructions()
         return unless @isRunning
         instruction = @context.getNextInstruction()
         if typeof instruction is "string"
-          lastResult = @context.eval(instruction)
+          @context.lastResult = @context.eval(instruction)
         else
           instruction.updateState @context
       # Reached end of current set of instructions, pop up to previous set.
       @context.popState()
-    lastResult
+    @context.done()
 
   pause: ->
     @isRunning = false
