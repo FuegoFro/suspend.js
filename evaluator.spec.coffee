@@ -1,5 +1,3 @@
-# Todo: Use the field names the parser uses
-# Todo: Possibly use a better statement matching format?
 describe "The evaluator module", ->
   evaluator = undefined
   beforeEach ->
@@ -49,7 +47,7 @@ describe "The evaluator module", ->
 
         toBeFunctionDef: (name, params, body, tempVar) ->
           message = null
-          unless @env.equals_ @actual, jasmine.any(evaluator.Function)
+          unless @env.equals_ @actual, jasmine.any(Evaluator.Function)
             message = "Expected #{@actual} to be an instance of " +
             "the evaluator's Function class"
           else unless @actual.name == name
@@ -71,7 +69,7 @@ describe "The evaluator module", ->
           message == null
 
         toBeFunctionCall: (callee, args, tempVar, isObjectCreation=false) ->
-          targetClass = if isObjectCreation then evaluator.NewObject else evaluator.FunctionCall
+          targetClass = if isObjectCreation then Evaluator.NewObject else Evaluator.FunctionCall
           message = null
           unless @env.equals_ @actual, jasmine.any(targetClass)
             message = "Expected #{@actual} to be instance of #{targetClass}."
@@ -92,11 +90,11 @@ describe "The evaluator module", ->
       body = esprima.parse(expressionString).body
       expect(body.length).toEqual 1
       expect(body[0].type).toEqual "ExpressionStatement"
-      evaluator.compileExpression body[0].expression
+      Evaluator.compileExpression body[0].expression
 
     getStatementsBytecode = (statementsString) ->
       ast = esprima.parse(statementsString).body
-      evaluator.compileStatements ast
+      Evaluator.compileStatements ast
 
     tempName = (index) ->
       "$__temp__[#{index}]"
@@ -110,7 +108,6 @@ describe "The evaluator module", ->
           "[1, true, 'hi', foo]", # array
           "({a: 1})", "({msg: 'hello', arr: [1,2,3], obj: {foo: 'bar'}})", # Object literals
           "1, 2, red, blue", # sequence
-          # Todo: Object getter and setter literals
           "-a", "+5", "!hello", "~true", "! 'hey'", # character unary operators
           "typeof obj", "void 'hi'", "delete foo", # string unary operators
           "a in b", "'0' == false", # binary operators
@@ -199,7 +196,7 @@ describe "The evaluator module", ->
         expect(bytecode.preInstructions.length).toEqual 2
         expect(bytecode.preInstructions[0]).toHaveSameAST "#{temp} = a"
         ifStatement = bytecode.preInstructions[1]
-        expect(ifStatement).toEqual jasmine.any(evaluator.If)
+        expect(ifStatement).toEqual jasmine.any(Evaluator.If)
         expect(ifStatement.condition).toHaveSameAST temp
         expect(ifStatement.thenCase).toHaveSameAST ["#{temp} = b"]
         expect(ifStatement.elseCase).toEqual []
@@ -221,7 +218,7 @@ describe "The evaluator module", ->
         expect(bytecode.preInstructions[0]).toBeFunctionCall 'f', [], t1
         expect(bytecode.preInstructions[1]).toHaveSameAST "#{t0} = #{t1}"
         ifStatement = bytecode.preInstructions[2]
-        expect(ifStatement).toEqual jasmine.any(evaluator.If)
+        expect(ifStatement).toEqual jasmine.any(Evaluator.If)
         expect(ifStatement.condition).toHaveSameAST "!#{t0}"
         expect(ifStatement.thenCase.length).toEqual 2
         expect(ifStatement.thenCase[0]).toBeFunctionCall 'g', [], t0
@@ -247,7 +244,7 @@ describe "The evaluator module", ->
         expect(bytecode.preInstructions.length).toEqual 2
         expect(bytecode.preInstructions[0]).toBeFunctionCall 'a', [], t1
         ifStatement = bytecode.preInstructions[1]
-        expect(ifStatement).toEqual jasmine.any(evaluator.If)
+        expect(ifStatement).toEqual jasmine.any(Evaluator.If)
         expect(ifStatement.condition).toHaveSameAST t1
         expect(ifStatement.thenCase.length).toEqual 2
         expect(ifStatement.thenCase[0]).toBeFunctionCall 'b', [], t0
@@ -258,9 +255,6 @@ describe "The evaluator module", ->
 
         expect(bytecode.expression).toEqual t0
 
-    
-    # Todo: Parentheses for order of operations:
-    #    new (foo()) ();
     describe "statement bytecode", ->
       ###
       Ensures that statements are compiled properly
@@ -338,7 +332,7 @@ describe "The evaluator module", ->
         bytecode = getExpressionBytecode("(function () {return 5})")
         func = bytecode.preInstructions[0]
         returnInst = func.body.instructions[0]
-        expect(returnInst).toEqual jasmine.any(evaluator.Return)
+        expect(returnInst).toEqual jasmine.any(Evaluator.Return)
         expect(returnInst.value).toEqual "5"
 
       it "flattens block statements", ->
@@ -370,7 +364,7 @@ describe "The evaluator module", ->
         expect(bytecode.instructions[0]).toHaveSameAST "myval = 'hi'"
         expect(bytecode.instructions[1]).toBeFunctionCall "isHi", ["myval"], tempName(0)
         ifStatement = bytecode.instructions[2]
-        expect(ifStatement).toEqual jasmine.any(evaluator.If)
+        expect(ifStatement).toEqual jasmine.any(Evaluator.If)
         expect(ifStatement.condition).toHaveSameAST "!#{tempName(0)}"
         expect(ifStatement.thenCase).toHaveSameAST ["a = 1"]
         expect(ifStatement.elseCase).toHaveSameAST ["b = 2"]
@@ -396,8 +390,6 @@ describe "The evaluator module", ->
           "}"
         expectStatementsEqual original, ["a = 1", "a++"]
 
-      
-      # Todo: Skipping labels, not allowing labelled breaks/continues for now
       it "creates With blocks with function scope", ->
         bytecode = getStatementsBytecode(
           "with (getEnv()) {" +
@@ -409,8 +401,8 @@ describe "The evaluator module", ->
         expect(bytecode.declaredFunctions.length).toEqual 1
         expect(bytecode.declaredFunctions[0]).toBeFunctionDef "b", [], "", null
         expect(bytecode.instructions).toEqual [
-          new evaluator.FunctionCall("getEnv", [], tempName(0)),
-          new evaluator.With(tempName(0), ["a = 1"])
+          new Evaluator.FunctionCall("getEnv", [], tempName(0)),
+          new Evaluator.With(tempName(0), ["a = 1"])
         ]
 
       describe "creating Switch blocks", ->
@@ -451,26 +443,26 @@ describe "The evaluator module", ->
           expect(bytecode.instructions.length).toEqual 3
           expect(bytecode.instructions[0]).toBeFunctionCall 'val', [], t1
           firstLevel = bytecode.instructions[1]
-          expect(firstLevel).toEqual jasmine.any(evaluator.If)
+          expect(firstLevel).toEqual jasmine.any(Evaluator.If)
           expect(firstLevel.condition).toHaveSameAST "#{t1} == first"
           expect(firstLevel.thenCase).toHaveSameAST ["#{t0} = 0"]
           expect(firstLevel.elseCase.length).toEqual 1
 
           secondLevel = firstLevel.elseCase[0]
-          expect(secondLevel).toEqual jasmine.any(evaluator.If)
+          expect(secondLevel).toEqual jasmine.any(Evaluator.If)
           expect(secondLevel.condition).toHaveSameAST "#{t1} == 'second'"
           expect(secondLevel.thenCase).toHaveSameAST ["#{t0} = 3"]
           expect(secondLevel.elseCase.length).toEqual 2
           expect(secondLevel.elseCase[0]).toBeFunctionCall 'third', [], t2
 
           thirdLevel = secondLevel.elseCase[1]
-          expect(thirdLevel).toEqual jasmine.any(evaluator.If)
+          expect(thirdLevel).toEqual jasmine.any(Evaluator.If)
           expect(thirdLevel.condition).toHaveSameAST "#{t1} == #{t2}"
           expect(thirdLevel.thenCase).toHaveSameAST ["#{t0} = 4"]
           expect(thirdLevel.elseCase).toHaveSameAST ["#{t0} = null"]
 
           switchStatement = bytecode.instructions[2]
-          expect(switchStatement).toEqual jasmine.any(evaluator.Switch)
+          expect(switchStatement).toEqual jasmine.any(Evaluator.Switch)
           expect(switchStatement.startPCVar).toEqual t0
           inst = switchStatement.instructions
           expect(inst[0]).toHaveSameAST "a = 2"
@@ -495,8 +487,8 @@ describe "The evaluator module", ->
           inst = bytecode.instructions
           expect(inst.length).toEqual 3
           expect(inst[0]).toBeFunctionCall "foo", [], tempName(1)
-          expect(inst[1]).toEqual jasmine.any(evaluator.If)
-          expect(inst[2]).toEqual jasmine.any(evaluator.Switch)
+          expect(inst[1]).toEqual jasmine.any(Evaluator.If)
+          expect(inst[2]).toEqual jasmine.any(Evaluator.Switch)
           expect(inst[2].startPCVar).toEqual tempName(0)
 
         it "stores a default index", ->
@@ -522,19 +514,19 @@ describe "The evaluator module", ->
           temp = tempName(0)
           expect(bytecode.instructions.length).toEqual 2
           firstLevel = bytecode.instructions[0]
-          expect(firstLevel).toEqual jasmine.any(evaluator.If)
+          expect(firstLevel).toEqual jasmine.any(Evaluator.If)
           expect(firstLevel.condition).toHaveSameAST "val == 'foo'"
           expect(firstLevel.thenCase).toHaveSameAST ["#{temp} = 0"]
           expect(firstLevel.elseCase.length).toEqual 1
 
           secondLevel = firstLevel.elseCase[0]
-          expect(secondLevel).toEqual jasmine.any(evaluator.If)
+          expect(secondLevel).toEqual jasmine.any(Evaluator.If)
           expect(secondLevel.condition).toHaveSameAST "val == 'bar'"
           expect(secondLevel.thenCase).toHaveSameAST ["#{temp} = 2"]
           expect(secondLevel.elseCase).toHaveSameAST ["#{temp} = 1"]
 
           switchStatement = bytecode.instructions[1]
-          expect(switchStatement).toEqual jasmine.any(evaluator.Switch)
+          expect(switchStatement).toEqual jasmine.any(Evaluator.Switch)
           expect(switchStatement.startPCVar).toEqual temp
 
       it "creates break statements", ->
@@ -546,7 +538,7 @@ describe "The evaluator module", ->
         )
         switchStatement = bytecode.instructions[1]
         breakStatement = switchStatement.instructions[0]
-        expect(breakStatement).toEqual jasmine.any(evaluator.Break)
+        expect(breakStatement).toEqual jasmine.any(Evaluator.Break)
 
       it "does not allow break statements to have labels", ->
         original =
@@ -568,7 +560,7 @@ describe "The evaluator module", ->
         )
         whileStatement = bytecode.instructions[0]
         continueStatement = whileStatement.instructions[1]
-        expect(continueStatement).toEqual jasmine.any(evaluator.Continue)
+        expect(continueStatement).toEqual jasmine.any(Evaluator.Continue)
 
       it "doesn't allow labelled continues", ->
         original =
@@ -599,21 +591,21 @@ describe "The evaluator module", ->
 
           expect(bytecode.instructions.length).toEqual 1
           loopInstr = bytecode.instructions[0]
-          expect(loopInstr).toEqual jasmine.any(evaluator.Loop)
+          expect(loopInstr).toEqual jasmine.any(Evaluator.Loop)
           expect(loopInstr.instructions.length).toEqual 5
 
           expect(loopInstr.instructions[0]).toBeFunctionCall "shouldStop", [], tempName(0)
 
           ifStatement = loopInstr.instructions[1]
-          expect(ifStatement).toEqual jasmine.any(evaluator.If)
+          expect(ifStatement).toEqual jasmine.any(Evaluator.If)
           expect(ifStatement.condition).toHaveSameAST "!!#{tempName(0)}"
           expect(ifStatement.thenCase.length).toEqual 1
-          expect(ifStatement.thenCase[0]).toEqual jasmine.any(evaluator.Break)
+          expect(ifStatement.thenCase[0]).toEqual jasmine.any(Evaluator.Break)
           expect(ifStatement.elseCase).toEqual []
 
           expect(loopInstr.instructions[2]).toHaveSameAST "a = 1 + 2"
           expect(loopInstr.instructions[3]).toHaveSameAST "a++"
-          expect(loopInstr.instructions[4]).toEqual jasmine.any(evaluator.Continue)
+          expect(loopInstr.instructions[4]).toEqual jasmine.any(Evaluator.Continue)
 
         it "uses function scope", ->
           bytecode = getStatementsBytecode(
@@ -646,21 +638,21 @@ describe "The evaluator module", ->
 
           expect(bytecode.instructions.length).toEqual 1
           loopInstr = bytecode.instructions[0]
-          expect(loopInstr).toEqual jasmine.any(evaluator.Loop)
+          expect(loopInstr).toEqual jasmine.any(Evaluator.Loop)
           expect(loopInstr.instructions.length).toEqual 5
           expect(loopInstr.initialPC).toEqual 2 # Do not want to check the predicate the first time
 
           expect(loopInstr.instructions[0]).toBeFunctionCall "shouldStop", [], tempName(0)
           ifStatement = loopInstr.instructions[1]
-          expect(ifStatement).toEqual jasmine.any(evaluator.If)
+          expect(ifStatement).toEqual jasmine.any(Evaluator.If)
           expect(ifStatement.condition).toHaveSameAST "!!#{tempName(0)}"
           expect(ifStatement.thenCase.length).toEqual 1
-          expect(ifStatement.thenCase[0]).toEqual jasmine.any(evaluator.Break)
+          expect(ifStatement.thenCase[0]).toEqual jasmine.any(Evaluator.Break)
           expect(ifStatement.elseCase).toEqual []
 
           expect(loopInstr.instructions[2]).toHaveSameAST "a = 1 + 2"
           expect(loopInstr.instructions[3]).toHaveSameAST "a++"
-          expect(loopInstr.instructions[4]).toEqual jasmine.any(evaluator.Continue)
+          expect(loopInstr.instructions[4]).toEqual jasmine.any(Evaluator.Continue)
 
         it "uses function scope", ->
           bytecode = getStatementsBytecode(
@@ -696,22 +688,22 @@ describe "The evaluator module", ->
           expect(bytecode.instructions[0]).toBeFunctionCall "initVar", [], t0
           expect(bytecode.instructions[1]).toHaveSameAST "i = #{t0}"
           loopInstr = bytecode.instructions[2]
-          expect(loopInstr).toEqual jasmine.any(evaluator.Loop)
+          expect(loopInstr).toEqual jasmine.any(Evaluator.Loop)
           expect(loopInstr.instructions.length).toEqual 6
 
           expect(loopInstr.instructions[0]).toBeFunctionCall "lst", [], t0
 
           ifStatement = loopInstr.instructions[1]
-          expect(ifStatement).toEqual jasmine.any(evaluator.If)
+          expect(ifStatement).toEqual jasmine.any(Evaluator.If)
           expect(ifStatement.condition).toHaveSameAST "!(i !== #{t0}.length)"
           expect(ifStatement.thenCase.length).toEqual 1
-          expect(ifStatement.thenCase[0]).toEqual jasmine.any(evaluator.Break)
+          expect(ifStatement.thenCase[0]).toEqual jasmine.any(Evaluator.Break)
           expect(ifStatement.elseCase).toEqual []
 
           expect(loopInstr.instructions[2]).toBeFunctionCall "a.push", ["i + 1"], t0
           expect(loopInstr.instructions[3]).toHaveSameAST t0
           expect(loopInstr.instructions[4]).toHaveSameAST "i++"
-          expect(loopInstr.instructions[5]).toEqual jasmine.any(evaluator.Continue)
+          expect(loopInstr.instructions[5]).toEqual jasmine.any(Evaluator.Continue)
 
         it "uses function scope", ->
           bytecode = getStatementsBytecode(
@@ -729,42 +721,37 @@ describe "The evaluator module", ->
           bytecode = getStatementsBytecode("for (; b; c) {}")
           expect(bytecode.instructions.length).toEqual 1 # Loop
           forLoop = bytecode.instructions[0]
-          expect(forLoop).toEqual jasmine.any(evaluator.Loop)
+          expect(forLoop).toEqual jasmine.any(Evaluator.Loop)
           expect(forLoop.instructions.length).toEqual 3 # Finished test, update, continue
-          expect(forLoop.instructions[0]).toEqual jasmine.any(evaluator.If)
+          expect(forLoop.instructions[0]).toEqual jasmine.any(Evaluator.If)
           expect(forLoop.instructions[0].condition).toHaveSameAST "!b"
-          expect(forLoop.instructions[0].thenCase).toEqual [jasmine.any(evaluator.Break)]
+          expect(forLoop.instructions[0].thenCase).toEqual [jasmine.any(Evaluator.Break)]
           expect(forLoop.instructions[0].elseCase).toEqual []
           expect(forLoop.instructions[1]).toEqual "c"
-          expect(forLoop.instructions[2]).toEqual jasmine.any(evaluator.Continue)
+          expect(forLoop.instructions[2]).toEqual jasmine.any(Evaluator.Continue)
           
           # No finished test
           bytecode = getStatementsBytecode("for (a; ; c) {}")
           expect(bytecode.instructions.length).toEqual 2 # Initializer and loop
           expect(bytecode.instructions[0]).toEqual "a"
           forLoop = bytecode.instructions[1]
-          expect(forLoop).toEqual jasmine.any(evaluator.Loop)
+          expect(forLoop).toEqual jasmine.any(Evaluator.Loop)
           expect(forLoop.instructions.length).toEqual 2 # Update and continue
           expect(forLoop.instructions[0]).toEqual "c"
-          expect(forLoop.instructions[1]).toEqual jasmine.any(evaluator.Continue)
+          expect(forLoop.instructions[1]).toEqual jasmine.any(Evaluator.Continue)
           
           # No update
           bytecode = getStatementsBytecode("for (a; b; ) {}")
           expect(bytecode.instructions.length).toEqual 2 # Initializer and loop
           expect(bytecode.instructions[0]).toEqual "a"
           forLoop = bytecode.instructions[1]
-          expect(forLoop).toEqual jasmine.any(evaluator.Loop)
+          expect(forLoop).toEqual jasmine.any(Evaluator.Loop)
           expect(forLoop.instructions.length).toEqual 2 # Finished test and continue
-          expect(forLoop.instructions[0]).toEqual jasmine.any(evaluator.If)
+          expect(forLoop.instructions[0]).toEqual jasmine.any(Evaluator.If)
           expect(forLoop.instructions[0].condition).toHaveSameAST "!b"
-          expect(forLoop.instructions[0].thenCase).toEqual [jasmine.any(evaluator.Break)]
+          expect(forLoop.instructions[0].thenCase).toEqual [jasmine.any(Evaluator.Break)]
           expect(forLoop.instructions[0].elseCase).toEqual []
-          expect(forLoop.instructions[1]).toEqual jasmine.any(evaluator.Continue)
-
-  # Todo: Handle labelled continues and breaks
-  # Todo: Handle try, throw, catch
-  # Todo: Handle For ... In loops
-  # Todo: Handle object getters and setters
+          expect(forLoop.instructions[1]).toEqual jasmine.any(Evaluator.Continue)
 
   describe "when interpreting bytecode", ->
     it "uses its context to evaluate non-function expressions", ->
@@ -1014,7 +1001,6 @@ describe "The evaluator module", ->
         "[a, f()];"
       expect(evaluator.eval(program)).toEqual [0, 1]
 
-    # Todo: More scoping tests
     it "jumps to the correct case in a switch statement", ->
       program =
         "a = 0;" +
@@ -1159,38 +1145,33 @@ describe "The evaluator module", ->
       evaluator.resume()
       expect(myObject.val).toEqual 3
 
-
-
-
-# Execution to do's:
-# Todo: Test function expressions
-#    Handle creation of closures and proper prototype chains
-#    Make sure function toString works
-#    Make sure named function expressions work:
-#      f = function a() {/* a defined */}; /* a not defined */
-# Todo: Test 'new' object creation
-#    See function/method calls below. Also need to handle object creation
-#    ourselves using Object.create and then calling the constructor with
-#    the created object as the 'this' parameter.
-# Todo: Test function/method calls
-#    If function is actually object and instance of our custom function
-#    type, then execute our way. Otherwise execute normally. If result is
-#    a promise (some other way to tell that it is our function? our
-#    function will tell the evaluator that the next thing is a promise?)
-#    then wait for it to be done and re-start evaluation.
-#
-#    Wrap in a function call to set 'this'
-#
-#    Also need to handle everything defined on Function.prototype
-#      (eg call, apply, toString).
+# Todo: Handle creation of proper prototype chains on functions
+# Todo: Test 'new' object creation calling Object.create ourselves and then
+#   calling the constructor with the created object as the 'this' parameter.
+# Todo: If result is a promise (some other way to tell that it is our function?
+#   our function will tell the evaluator that the next thing is a promise?)
+#   then wait for it to be done and re-start evaluation.
+# Todo: Handle everything defined on Function.prototype (eg call, apply, toString).
 # Todo: Don't allow eval or eval-like functionality
 # Todo: Make sure 'this' and 'arguments' work
 # Todo: Make sure all 'hidden' variables are defined/work (eg $__temp__ array)
 # Todo: Test when a function's name is re-defined within the function
 # Todo: 'var' statements should evaluate to undefined
 # Todo: After resuming, errors need to bubble up
-#    - entire result passing system needs to be callback based
+#   - entire result passing system needs to be callback based
 # Todo: Errors should clear the execution state/stack
 # Todo: Allow user defined functions to be called by native functions
 # Todo: Test With block evaluation
 # Todo: Test object creation
+# Todo: More scoping tests
+# Todo: Flush out documentation
+# Todo: Handle labelled continues and breaks
+# Todo: Handle try, throw, catch
+# Todo: Handle For ... In loops
+# Todo: Handle object getters and setters
+# Todo: Skipping labels, not allowing labelled breaks/continues for now
+# Todo: Parentheses for order of operations:
+#   new (foo()) ();
+# Todo: Object getter and setter literals
+# Todo: Use the field names the parser uses
+# Todo: Possibly use a better statement matching format?

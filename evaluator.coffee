@@ -412,7 +412,7 @@ sandboxed fashion.
 class Context
   constructor: (scope) ->
     @scope = scope
-    @state = []
+    @stateStack = []
 
   eval: (command) ->
     # Wrap command in 'with' blocks for scoping
@@ -428,18 +428,18 @@ class Context
     @scope.eval command
 
   pushState: (instructions, controlObject, environment) ->
-    @state.push
+    @stateStack.push
       instructions: instructions
       pc: 0
       controlObject: controlObject or null
       environment: environment or @getEnvironment()
 
   popState: ->
-    @state.pop()
+    @stateStack.pop()
 
   getCurrentState: ->
-    if @state.length > 0
-      @state[@state.length - 1]
+    if @stateStack.length > 0
+      @stateStack[@stateStack.length - 1]
     else
       instructions: []
       pc: 0
@@ -457,7 +457,7 @@ class Context
     instruction
 
   finishedExecution: ->
-    @state.length is 0
+    @stateStack.length is 0
 
   getControlObject: ->
     @getCurrentState().controlObject
@@ -472,7 +472,7 @@ class Context
     @scope["$__result__"] = value
     @eval name + " = $__result__"
 
-class EvaluatorClass
+class Evaluator
   constructor: ->
     iframe = document.createElement("iframe")
     iframe.height = iframe.width = 0
@@ -512,19 +512,19 @@ class EvaluatorClass
     @isRunning = true
     @execute()
 
-EvaluatorClass::compileStatements = compileStatements
-EvaluatorClass::compileExpression = compileExpression
-EvaluatorClass::Function = FunctionDefinition
-EvaluatorClass::FunctionCall = FunctionCall
-EvaluatorClass::NewObject = NewObject
-EvaluatorClass::Return = Return
-EvaluatorClass::Continue = Continue
-EvaluatorClass::Break = Break
-EvaluatorClass::If = If
-EvaluatorClass::With = With
-EvaluatorClass::Switch = Switch
-EvaluatorClass::Loop = Loop
-window.Evaluator = EvaluatorClass
+Evaluator.compileStatements = compileStatements
+Evaluator.compileExpression = compileExpression
+Evaluator.Function = FunctionDefinition
+Evaluator.FunctionCall = FunctionCall
+Evaluator.NewObject = NewObject
+Evaluator.Return = Return
+Evaluator.Continue = Continue
+Evaluator.Break = Break
+Evaluator.If = If
+Evaluator.With = With
+Evaluator.Switch = Switch
+Evaluator.Loop = Loop
+window.Evaluator = Evaluator
 
 # Helper functions
 
