@@ -279,13 +279,18 @@ class Closure
     @function.body.declaredFunctions.concat @function.body.instructions
 
   getEnvironment: (args) ->
-    newEnvironmentFrame = {}
+    newEnvironmentFrame = $__temp__: []
     for variable in @function.body.declaredVariables
       newEnvironmentFrame[variable] = undefined
     for func in @function.body.declaredFunctions
       newEnvironmentFrame[func.name] = undefined
     for param, i in @function.params
       newEnvironmentFrame[param] = args[i]
+    if @function.tempVar isnt null and @function.name isnt null
+      # this is not a declared function but it has a name, need to define
+      # the name of the function to be the function itself
+      newEnvironmentFrame[@function.name] = this
+
     return @environment.concat [newEnvironmentFrame]
 
 class FunctionDefinition

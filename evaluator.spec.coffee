@@ -1122,6 +1122,35 @@ describe "The evaluator module", ->
         "f();"
       expect(evaluator.eval(program)).toEqual [4, 0, true, false]
 
+    it "prevents over writing of in use temporary variables", ->
+      program =
+        "function makeBools(first, second) {" +
+        "  return [Boolean(first), Boolean(second)];" +
+        "}" +
+        "[makeBools(0, '0'), makeBools('null', null)];"
+      expect(evaluator.eval(program)).toEqual [[false, true], [true, false]]
+
+    it "sets the function's name as a variable that points to the function inside " +
+       "named function expressions", ->
+      # This is a weird quirk of Javascript. If you have a named function expression
+      # (not a declaration, but the function is assigned to a variable) then whenever
+      # you call that function, the name of the function is a variable within the scope
+      # of the function, but it is not available outside the function
+      program =
+        "function foo() {return foo;}" +
+        "a = foo;" +
+        "foo = 1;" +
+        "a();"
+      expect(evaluator.eval(program)).toEqual 1
+
+      program =
+        "delete foo;" + # Get rid of it from previous tests
+        "bar = function foo() {return foo;};" +
+        "fooExists = 'foo' in window;" +
+        "foo = 1;" +
+        "[bar() === bar, fooExists];"
+      expect(evaluator.eval(program)).toEqual [true, false]
+
     it "can pause execution", ->
       pauseExecFunc = ->
         evaluator.pause()
@@ -1154,8 +1183,6 @@ describe "The evaluator module", ->
 # Todo: Handle everything defined on Function.prototype (eg call, apply, toString).
 # Todo: Don't allow eval or eval-like functionality
 # Todo: Make sure 'this' and 'arguments' work
-# Todo: Make sure all 'hidden' variables are defined/work (eg $__temp__ array)
-# Todo: Test when a function's name is re-defined within the function
 # Todo: 'var' statements should evaluate to undefined
 # Todo: After resuming, errors need to bubble up
 #   - entire result passing system needs to be callback based
