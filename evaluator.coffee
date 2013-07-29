@@ -523,8 +523,10 @@ class Context
     try
       @scope.eval command
     catch e
-      e.stack = null
-      @pushState [new Throw(e, true)]
+      # Need to get rid of stack trace, but some browsers don't let you modify
+      # the .stack field of error objects, so we are wrapping this object.
+      newError = Object.create(e, stack: {value: null})
+      @pushState [new Throw(newError, true)]
 
   done: (value, isError) ->
     unless @isDone

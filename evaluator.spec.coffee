@@ -1546,7 +1546,7 @@ describe "The evaluator module", ->
         program =
           "delete foo;" +
           "foo;"
-        expect(program).toEvaluateTo ReferenceError('foo is not defined'), true
+        expect(program).toEvaluateTo jasmine.any(evaluator.scope.ReferenceError), true
 
       it "can catch native exceptions", ->
         program =
@@ -1558,7 +1558,7 @@ describe "The evaluator module", ->
           "  myerr = e;" +
           "}" +
           "myerr;"
-        expect(program).toEvaluateTo ReferenceError('foo is not defined')
+        expect(program).toEvaluateTo jasmine.any(evaluator.scope.ReferenceError)
 
       it "doesn't have a stack trace", ->
         program =
@@ -1570,7 +1570,7 @@ describe "The evaluator module", ->
           "  myerr = e;" +
           "}" +
           "[myerr.name, myerr.message, myerr.stack];"
-        expect(program).toEvaluateTo ['ReferenceError', 'foo is not defined', null]
+        expect(program).toEvaluateTo ['ReferenceError', jasmine.any(String), null]
 
     it "can pause execution", ->
       evaluator.scope.pauseExecFunc = ->
