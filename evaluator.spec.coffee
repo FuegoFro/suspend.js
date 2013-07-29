@@ -1497,6 +1497,7 @@ describe "The evaluator module", ->
           "};" +
           "f();"
         expect(program).toEvaluateTo 2
+
       it "can continue, break, and return from inside a finally", ->
         program =
           "f = function () {" +
@@ -1540,6 +1541,36 @@ describe "The evaluator module", ->
           "};" +
           "f();"
         expect(program).toEvaluateTo 2
+
+      it "can throw native exceptions", ->
+        program =
+          "delete foo;" +
+          "foo;"
+        expect(program).toEvaluateTo ReferenceError('foo is not defined'), true
+
+      it "can catch native exceptions", ->
+        program =
+          "delete foo;" +
+          "myerr = null;" +
+          "try {" +
+          "  foo;" +
+          "} catch (e) {" +
+          "  myerr = e;" +
+          "}" +
+          "myerr;"
+        expect(program).toEvaluateTo ReferenceError('foo is not defined')
+
+      it "doesn't have a stack trace", ->
+        program =
+          "delete foo;" +
+          "myerr = null;" +
+          "try {" +
+          "  foo;" +
+          "} catch (e) {" +
+          "  myerr = e;" +
+          "}" +
+          "[myerr.name, myerr.message, myerr.stack];"
+        expect(program).toEvaluateTo ['ReferenceError', 'foo is not defined', null]
 
     it "can pause execution", ->
       evaluator.scope.pauseExecFunc = ->

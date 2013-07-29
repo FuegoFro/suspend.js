@@ -420,7 +420,7 @@ class Throw
     else
       errorObject = context.eval @error
 
-    while context.hasMoreStates() and not context.getControlObject()?.canCatch()
+    while context.hasMoreStates() and not context.getControlObject().canCatch()
       context.popState()
     if context.hasMoreStates()
       # Store off reference to current control object (probably a try) and
@@ -520,7 +520,11 @@ class Context
       postWrap += "}"
 
     command = preWrap + command + postWrap
-    @scope.eval command
+    try
+      @scope.eval command
+    catch e
+      e.stack = null
+      @pushState [new Throw(e, true)]
 
   done: (value, isError) ->
     unless @isDone
@@ -531,7 +535,7 @@ class Context
     @stateStack.push
       instructions: instructions
       pc: 0
-      controlObject: controlObject or null
+      controlObject: controlObject or new ControlBlock()
       environment: environment or @getEnvironment()
 
   popState: ->
