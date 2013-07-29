@@ -256,9 +256,6 @@ describe "The evaluator module", ->
         expect(bytecode.expression).toEqual t0
 
     describe "statement bytecode", ->
-      ###
-      Ensures that statements are compiled properly
-      ###
       expectStatementsEqual = (program, expectedStatements, expectedVariables, expectedFunctions) ->
         expectedVariables = expectedVariables or []
         expectedFunctions = expectedFunctions or []
@@ -753,19 +750,101 @@ describe "The evaluator module", ->
           expect(forLoop.instructions[0].elseCase).toEqual []
           expect(forLoop.instructions[1]).toEqual jasmine.any(Evaluator.Continue)
 
+      describe "creating Try Catch Finally blocks", ->
+        it "stores the instructions in the try, catch and finally block", ->
+          bytecode = getStatementsBytecode(
+            "try {" +
+            "  a = 1; b = a + 'hi';" +
+            "} catch (err) {" +
+            "  c = 2; d;" +
+            "} finally {" +
+            "  e + f * g" +
+            "}"
+          )
+          expect(bytecode.instructions.length).toEqual 1
+          tryStatement = bytecode.instructions[0]
+          expect(tryStatement).toEqual jasmine.any(Evaluator.Try)
+          expect(tryStatement.tryBlock).toHaveSameAST ["a = 1", "b = a + 'hi'"]
+          expect(tryStatement.catchBlock).toHaveSameAST ["c = 2", "d"]
+          expect(tryStatement.catchVariable).toEqual "err"
+          expect(tryStatement.finallyBlock).toHaveSameAST ["e + f * g"]
+
+        it "uses function scope", ->
+          bytecode = getStatementsBytecode(
+            "try {" +
+            "  var a;" +
+            "  function b() {}" +
+            "} catch (e) {" +
+            "  var c;" +
+            "  function d() {}" +
+            "} finally {" +
+            "  var e;" +
+            "  function f() {}" +
+            "}"
+          )
+          expect(bytecode.declaredVariables).toEqual ['a', 'c', 'e']
+          expect(bytecode.declaredFunctions.length).toEqual 3
+          expect(bytecode.declaredFunctions[0]).toBeFunctionDef 'b', [], '', null
+          expect(bytecode.declaredFunctions[1]).toBeFunctionDef 'd', [], '', null
+          expect(bytecode.declaredFunctions[2]).toBeFunctionDef 'f', [], '', null
+
+        it "handles empty catch blocks", ->
+          bytecode = getStatementsBytecode(
+            "try {" +
+            "  a; b;" +
+            "} finally {" +
+            "  c; d;" +
+            "}"
+          )
+          expect(bytecode.instructions.length).toEqual 1
+          tryStatement = bytecode.instructions[0]
+          expect(tryStatement).toEqual jasmine.any(Evaluator.Try)
+          expect(tryStatement.tryBlock).toHaveSameAST ["a", "b"]
+          expect(tryStatement.catchBlock).toBeNull()
+          expect(tryStatement.catchVariable).toBeNull()
+          expect(tryStatement.finallyBlock).toHaveSameAST ["c", "d"]
+
+        it "handles empty finally blocks", ->
+          bytecode = getStatementsBytecode(
+            "try {" +
+            "  a; b;" +
+            "} catch(e) {" +
+            "  c; d;" +
+            "}"
+          )
+          expect(bytecode.instructions.length).toEqual 1
+          tryStatement = bytecode.instructions[0]
+          expect(tryStatement).toEqual jasmine.any(Evaluator.Try)
+          expect(tryStatement.tryBlock).toHaveSameAST ["a", "b"]
+          expect(tryStatement.catchBlock).toHaveSameAST ["c", "d"]
+          expect(tryStatement.catchVariable).toEqual "e"
+          expect(tryStatement.finallyBlock).toEqual []
+
+      it "creates Throw statements", ->
+        bytecode = getStatementsBytecode("throw 1 + 2")
+        expect(bytecode.instructions.length).toEqual 1
+        expect(bytecode.instructions[0]).toEqual jasmine.any(Evaluator.Throw)
+        expect(bytecode.instructions[0].error).toHaveSameAST "1 + 2"
+
   describe "when interpreting bytecode", ->
     beforeEach ->
       @addMatchers
-        toEvaluateTo: (expected) ->
+        toEvaluateTo: (expected, shouldBeError=false) ->
           evaluated = false
+          didError = false
           result = null
-          evaluator.eval @actual, (res) ->
+          evaluator.eval @actual, (res, didErr) ->
             evaluated = true
             result = res
+            didError = didErr
           @message = =>
-            "Expected #{@actual} to evaluate to #{jasmine.pp(expected)}, " +
-            "actually evaluated to #{jasmine.pp(result)}"
-          evaluated and @env.equals_ result, expected
+            expectErrStr = if shouldBeError then "" else "out"
+            actualErrStr = if didError then "" else "out"
+            expFormatted = jasmine.pp(expected)
+            resFormatted = jasmine.pp(result)
+            "Expected #{@actual} to evaluate to #{expFormatted} with#{expectErrStr} errors, " +
+            "actually evaluated to #{resFormatted} with#{actualErrStr} errors."
+          evaluated and @env.equals_(result, expected) and didError == shouldBeError
 
     it "uses its context to evaluate non-function expressions", ->
       num = 5
@@ -1194,6 +1273,274 @@ describe "The evaluator module", ->
         "f();"
       expect(program).toEvaluateTo 2
 
+    describe "handling errors", ->
+      it "evaluates code in Try blocks", ->
+        program =
+          "a = 0;" +
+          "try {" +
+          "  a += 1;" +
+          "} catch (e) {" +
+          "  a += 2;" +
+          "}" +
+          "a;"
+        expect(program).toEvaluateTo 1
+
+      it "evaluates code in Finally blocks", ->
+        program =
+          "a = 0;" +
+          "try {" +
+          "  a += 1;" +
+          "} finally {" +
+          "  a += 2;" +
+          "}" +
+          "a;"
+        expect(program).toEvaluateTo 3
+
+      it "can throw custom exceptions", ->
+        # Not using the jasmine matcher to make what's happening in the callback
+        # function more explicit
+        callback = jasmine.createSpy()
+        evaluator.eval "throw 'hello'", callback
+        expect(callback).toHaveBeenCalledWith('hello', true)
+
+      it "can throw exceptions from nested blocks", ->
+        program =
+          "function throwException() {throw 'my error';}" +
+          "if (true) {" +
+          "  with ({i: 0}) {" +
+          "    while (i === 0) {" +
+          "      switch (0) {" +
+          "      default:" +
+          "        throwException();" +
+          "      }" +
+          "      i++;" +
+          "    }" +
+          "  }" +
+          "}" +
+          "'foo';"
+        expect(program).toEvaluateTo 'my error', true
+
+      it "can catch thrown exceptions", ->
+        program =
+          "a = 0;" +
+          "try {" +
+          "  throw 'my error';" +
+          "  a += 1;" +
+          "} catch (e) {" +
+          "  a += 2;" +
+          "}" +
+          "a;"
+        expect(program).toEvaluateTo 2
+
+      it "can catch exceptions thrown from nested blocks", ->
+        program =
+          "a = 0;" +
+          "function throwException() {throw 'my error';}" +
+          "try {" +
+          "  if (true) {" +
+          "    with ({i: 0}) {" +
+          "      while (i === 0) {" +
+          "        switch (0) {" +
+          "        default:" +
+          "          throwException();" +
+          "        }" +
+          "        i++;" +
+          "      }" +
+          "    }" +
+          "  }" +
+          "  a += 1;" +
+          "} catch (e) {" +
+          "  a += 2;" +
+          "}" +
+          "a;"
+        expect(program).toEvaluateTo 2
+
+      it "has a reference to the error in catch blocks", ->
+        program =
+          "a = 0;" +
+          "try {" +
+          "  throw 2;" +
+          "  a += 1;" +
+          "} catch (e) {" +
+          "  a += e;" +
+          "}" +
+          "a;"
+        expect(program).toEvaluateTo 2
+
+      it "can throw from within a catch block", ->
+        program =
+          "count = 0;" +
+          "try {" +
+          "  throw 'my error';" +
+          "} catch (e) {" +
+          "  count++;" +
+          "  if (count < 2) {" +
+          "    throw 'error with count ' + count;" +
+          "  }" +
+          "}" +
+          "'foo';"
+        expect(program).toEvaluateTo 'error with count 1', true
+
+      it "will run the finally block after catching an exception", ->
+        program =
+          "a = 0;" +
+          "try {" +
+          "  throw 'error';" +
+          "  a += 1;" +
+          "} catch (e) {" +
+          "  a += 2;" +
+          "} finally {" +
+          "  a += 4" +
+          "}" +
+          "a;"
+        expect(program).toEvaluateTo 6
+
+      it "will rethrow caught exceptions at the end of the finally if there is no catch block", ->
+        program =
+          "myObj = {val: 0};" +
+          "try {" +
+          "  throw myObj;" +
+          "  myObj.val += 1;" +
+          "} finally {" +
+          "  myObj.val += 2;" +
+          "}" +
+          "'foo';"
+        expect(program).toEvaluateTo {val: 2}, true
+
+      it "does not catch exceptions thrown in the finally block", ->
+        program =
+          "a = 0;" +
+          "try {" +
+          "} finally {" +
+          "  a++;" +
+          "  throw a;" +
+          "}" +
+          "'foo';"
+        expect(program).toEvaluateTo 1, true
+
+      it "runs the finally block after the catch block throws an exception", ->
+        program =
+          "myObj = {val: 0};" +
+          "try {" +
+          "  throw myObj;" +
+          "  myObj.val += 1;" +
+          "} catch (e) {" +
+          "  throw myObj;" +
+          "  myObj.val += 2" +
+          "} finally {" +
+          "  myObj.val += 4;" +
+          "}" +
+          "'foo';"
+        expect(program).toEvaluateTo {val: 4}, true
+
+      it "bubbles up exceptions in the finally block", ->
+        program =
+          "try {" +
+          "  throw 'error in try';" +
+          "} catch (e) {" +
+          "  throw 'error in catch';" +
+          "} finally {" +
+          "  throw 'error in finally';" +
+          "}" +
+          "'foo';"
+        expect(program).toEvaluateTo 'error in finally', true
+
+        program =
+          "try {" +
+          "  throw 'error in try';" +
+          "} finally {" +
+          "  throw 'error in finally';" +
+          "}" +
+          "'foo';"
+        expect(program).toEvaluateTo 'error in finally', true
+
+      it "can continue, break, and return from inside a try", ->
+        program =
+          "f = function () {" +
+          "  a = 0;" +
+          "  while (a < 3) {" +
+          "    try {" +
+          "      a++;" +
+          "      if (a === 1) {" +
+          "        continue;" +
+          "      } else if (a === 2) {" +
+          "        break;" +
+          "      }" +
+          "    } catch (e) {}" +
+          "  }" +
+          "  try {" +
+          "    return a" +
+          "  } catch (e) {}" +
+          "};" +
+          "f();"
+        expect(program).toEvaluateTo 2
+
+      it "can continue, break, and return from inside a catch", ->
+        program =
+          "f = function () {" +
+          "  a = 0;" +
+          "  while (a < 3) {" +
+          "    try {" +
+          "      throw 'foo'" +
+          "    } catch (e) {" +
+          "      a++;" +
+          "      if (a === 1) {" +
+          "        continue;" +
+          "      } else if (a === 2) {" +
+          "        break;" +
+          "      }" +
+          "    }" +
+          "  }" +
+          "  try {" +
+          "    return a" +
+          "  } catch (e) {}" +
+          "};" +
+          "f();"
+        expect(program).toEvaluateTo 2
+      it "can continue, break, and return from inside a finally", ->
+        program =
+          "f = function () {" +
+          "  a = 0;" +
+          "  while (a < 3) {" +
+          "    try {" +
+          "    } finally {" +
+          "      a++;" +
+          "      if (a === 1) {" +
+          "        continue;" +
+          "      } else if (a === 2) {" +
+          "        break;" +
+          "      }" +
+          "    }" +
+          "  }" +
+          "  try {" +
+          "    return a" +
+          "  } catch (e) {}" +
+          "};" +
+          "f();"
+        expect(program).toEvaluateTo 2
+
+        program =
+          "f = function () {" +
+          "  a = 0;" +
+          "  while (a < 3) {" +
+          "    try {" +
+          "      throw 'my error';" +
+          "    } finally {" +
+          "      a++;" +
+          "      if (a === 1) {" +
+          "        continue;" +
+          "      } else if (a === 2) {" +
+          "        break;" +
+          "      }" +
+          "    }" +
+          "  }" +
+          "  try {" +
+          "    return a" +
+          "  } catch (e) {}" +
+          "};" +
+          "f();"
+        expect(program).toEvaluateTo 2
+
     it "can pause execution", ->
       evaluator.scope.pauseExecFunc = ->
         evaluator.pause()
@@ -1300,7 +1647,7 @@ describe "The evaluator module", ->
       evaluator.eval program, doneCallback
       expect(doneCallback).not.toHaveBeenCalled()
       evaluator.resume(context)
-      expect(doneCallback).toHaveBeenCalledWith "foobar"
+      expect(doneCallback).toHaveBeenCalledWith "foobar", false
 
 # Todo: Handle creation of proper prototype chains on functions
 # Todo: Test 'new' object creation calling Object.create ourselves and then
@@ -1327,3 +1674,5 @@ describe "The evaluator module", ->
 # Todo: Object getter and setter literals
 # Todo: Use the field names the parser uses
 # Todo: Possibly use a better statement matching format?
+# Todo: Change 'program' so that it's a single large string rather than a bunch
+#   of strings for readability

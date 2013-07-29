@@ -87,6 +87,8 @@ compileStatements = (statements) ->
       when "ContinueStatement"
         throw new Error("Does not support labelled continues.")  if statement.label isnt null
         instructions.push new Continue()
+      when "ThrowStatement"
+        instructions.push new Throw(subExpression(statement.argument))
       when "WithStatement"
         object = subExpression(statement.object)
         body = subStatements(statement.body)
@@ -128,6 +130,21 @@ compileStatements = (statements) ->
         merge instructions, makeSwitchCaseIndexChooser(caseMappings.reverse())
         # Create the actual switch statement
         instructions.push new Switch(startPCTemp, subInstructions)
+      when "TryStatement"
+        tryBlock = subStatements statement.block
+        catchBlock = catchVariable = finalBlock = null
+        unless statement.handlers.length is 0
+          # Assuming single handler, no guarding
+          catchBlock = subStatements statement.handlers[0].body
+          catchVariable = subExpression statement.handlers[0].param
+        finalBlock = subStatements statement.finalizer
+
+        instructions.push new Try(
+          tryBlock
+          catchBlock
+          catchVariable
+          finalBlock
+        )
       when "WhileStatement"
         loopInstructions = []
         merge loopInstructions, makeLoopTest(statement.test)
@@ -269,6 +286,7 @@ class ControlBlock
   canBreak: -> false
   canContinue: -> false
   canReturn: -> false
+  canCatch: -> false
 
 class Closure
   constructor: (func, env) ->
@@ -319,6 +337,7 @@ class FunctionCall
       context.eval @tempVar + " = " + @callee + "(" + @args.join(", ") + ")"
 
   canReturn: -> true
+  canCatch: -> false
 
   handleReturn: (context, value) ->
     context.setValue @tempVar, value
@@ -390,6 +409,74 @@ class Continue
     # Move to beginning of loop
     context.setPC 0
 
+class Throw
+  # Computed == false means that the error is a string that should be evaluated
+  # to obtain the actual error object.
+  # Computed == true means that the error is the actual object that was thrown.
+  constructor: (@error, @evaluated=false) ->
+  updateState: (context) ->
+    if @evaluated
+      errorObject = @error
+    else
+      errorObject = context.eval @error
+
+    while context.hasMoreStates() and not context.getControlObject()?.canCatch()
+      context.popState()
+    if context.hasMoreStates()
+      # Store off reference to current control object (probably a try) and
+      # remove the current set of instructions from the state stack (probably
+      # the try block)
+      controlObject = context.getControlObject()
+      context.popState()
+      # Allow the controlling object to update the state
+      controlObject.handleError(context, errorObject)
+    else
+      context.done(errorObject, true)
+
+class Try extends ControlBlock
+  constructor: (@tryBlock, @catchBlock, @catchVariable, @finallyBlock) ->
+    # Keep track of which block we're executing.
+    @_isInTry = false
+    @_isInCatch = false
+  updateState: (context) ->
+    # We're entering the try block.
+    @_isInTry = true
+    # Create a unique object that we can compare against.
+    @_endOfBlock = {}
+    # This is a hack to transfer control back to this object if the try block
+    # executes without throwing any exceptions. This allows us to run the
+    # finally block.
+    instructions = @tryBlock.concat [new Throw(@_endOfBlock, true)]
+    context.pushState instructions, this
+  # We only want to catch exceptions that occur in the try and catch blocks,
+  # not the finally blocks
+  canCatch: -> @_isInTry or @_isInCatch
+  handleError: (context, error) ->
+    if error is @_endOfBlock
+      @_isInTry = @_isInCatch = false
+      # The error thrown is the special object we created to mark the end of
+      # the try or catch block. This means we got through the block without any
+      # exceptions. If we have a finally block, we should add that state now.
+      if @finallyBlock.length > 0
+        context.pushState @finallyBlock, this
+    # Actual error
+    else if @_isInTry and @catchBlock isnt null
+      # Exception thrown in try, continue on to catch
+      @_isInTry = false
+      @_isInCatch = true
+      # Want to transfer control back to this object if no exceptions are
+      # thrown in catch in order to run the finally block if it exists.
+      instructions = @catchBlock.concat [new Throw(@_endOfBlock, true)]
+      newEnvironmentFrame = {}
+      newEnvironmentFrame[@catchVariable] = error
+      newEnvironment = context.getEnvironment().concat [newEnvironmentFrame]
+      context.pushState instructions, this, newEnvironment
+    else
+      # There is no catch block or exception thrown in catch block, run the
+      # finally block and re-throw the error when done.
+      @_isInTry = @_isInCatch = false
+      instructions = @finallyBlock.concat [new Throw(error, true)]
+      context.pushState instructions, this
 
 class Loop extends ControlBlock
   constructor: (instructions, initialPC) ->
@@ -420,7 +507,7 @@ sandboxed fashion.
 class Context
   constructor: (@scope, @onComplete) ->
     @stateStack = []
-    @lastResult = undefined
+    @isDone = false
 
   eval: (command) ->
     # Wrap command in 'with' blocks for scoping
@@ -435,8 +522,10 @@ class Context
     command = preWrap + command + postWrap
     @scope.eval command
 
-  done: ->
-    @onComplete?(@lastResult)
+  done: (value, isError) ->
+    unless @isDone
+      @isDone = true
+      @onComplete?(value, isError)
 
   pushState: (instructions, controlObject, environment) ->
     @stateStack.push
@@ -494,8 +583,13 @@ class Evaluator
 
 
   ###
-  Takes in the string of the code to be evaluated and a callback that is called
-  with the result of the evaluation (an arbitrary Javascript value).
+  Takes in the string of the code to be evaluated and a callback that has two
+  parameters. If the evaluation does not produce an error, the first argument
+  to the callback will be the result of the evaluation as expected normally
+  (an arbitrary Javascript value), and the second value will be the boolean
+  `false`. If an uncaught error occurs while evaluating the code, the first
+  argument will be the error object (again an arbitrary Javascript value) and
+  the second will be the boolean `true`.
   ###
   eval: (string, onComplete) ->
     @isRunning = true
@@ -507,17 +601,18 @@ class Evaluator
     @execute()
 
   execute: ->
+    lastResult = undefined
     while @context.hasMoreStates()
       while @context.stateHasMoreInstructions()
         return unless @isRunning
         instruction = @context.getNextInstruction()
         if typeof instruction is "string"
-          @context.lastResult = @context.eval(instruction)
+          lastResult = @context.eval(instruction)
         else
           instruction.updateState @context
       # Reached end of current set of instructions, pop up to previous set.
       @context.popState()
-    @context.done()
+    @context.done(lastResult, false)
 
   pause: ->
     @isRunning = false
@@ -540,9 +635,11 @@ Evaluator.NewObject = NewObject
 Evaluator.Return = Return
 Evaluator.Continue = Continue
 Evaluator.Break = Break
+Evaluator.Throw = Throw
 Evaluator.If = If
 Evaluator.With = With
 Evaluator.Switch = Switch
+Evaluator.Try = Try
 Evaluator.Loop = Loop
 window.Evaluator = Evaluator
 
