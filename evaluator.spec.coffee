@@ -857,8 +857,14 @@ describe "The evaluator module", ->
           @message = =>
             expectErrStr = if shouldBeError then "" else "out"
             actualErrStr = if didError then "" else "out"
-            expFormatted = jasmine.pp(expected)
-            resFormatted = jasmine.pp(result)
+            if expected instanceof Error or expected instanceof evaluator.scope.Error
+              expFormatted = expected.toString()
+            else
+              expFormatted = jasmine.pp(expected)
+            if result instanceof Error or result instanceof evaluator.scope.Error
+              resFormatted = result.toString()
+            else
+              resFormatted = jasmine.pp(result)
             program = @actual.replace(/\s+/g, " ") # Collapse white spaces
             "Expected #{program} to evaluate to #{expFormatted} with#{expectErrStr} errors, " +
             "actually evaluated to #{resFormatted} with#{actualErrStr} errors."
@@ -931,76 +937,77 @@ describe "The evaluator module", ->
       evaluator.eval "val = false"
       expect(program).toEvaluateTo 2
 
-    it "can break out of loops", ->
-      program = "
-         a = 0;
-         while (true) {
-           break;
-           a = 1;
-         }
-         a;"
-      expect(program).toEvaluateTo 0
+    describe "in loops", ->
+      it "can break out", ->
+        program = "
+           a = 0;
+           while (true) {
+             break;
+             a = 1;
+           }
+           a;"
+        expect(program).toEvaluateTo 0
 
-    it "can break out of nested blocks", ->
-      program = "
-         a = 0;
-         while (true) {
-           if (true) break;
-           a = 1;
-         }
-         a;"
-      expect(program).toEvaluateTo 0
-      program = "
-         a = 0;
-         do {
+      it "can break out of nested blocks", ->
+        program = "
+           a = 0;
            while (true) {
              if (true) break;
-             a += 1;
+             a = 1;
            }
-           a += 2
-         } while (false)
-         a;"
-      expect(program).toEvaluateTo 2
+           a;"
+        expect(program).toEvaluateTo 0
+        program = "
+           a = 0;
+           do {
+             while (true) {
+               if (true) break;
+               a += 1;
+             }
+             a += 2
+           } while (false)
+           a;"
+        expect(program).toEvaluateTo 2
 
-    it "can continue in loops", ->
-      program = "
-         a = 0;
-         while (true) {
-           if (a > 0) break;
-           a++;
-           continue;
-           a = 5;
-         }
-         a;"
-      expect(program).toEvaluateTo 1
+      it "can continue", ->
+        program = "
+           a = 0;
+           while (true) {
+             if (a > 0) break;
+             a++;
+             continue;
+             a = 5;
+           }
+           a;"
+        expect(program).toEvaluateTo 1
 
-    it "can continue in nested blocks", ->
-      program = "
-         a = 0;
-         while (true) {
-           if (a > 0) break;
-           a++;
-           if (true) continue;
-           a = 5;
-         }
-         a;"
-      expect(program).toEvaluateTo 1
+      it "can continue in nested blocks", ->
+        program = "
+           a = 0;
+           while (true) {
+             if (a > 0) break;
+             a++;
+             if (true) continue;
+             a = 5;
+           }
+           a;"
+        expect(program).toEvaluateTo 1
 
-    it "repeats loops normally", ->
-      program = "
-         a = 0;
-         while (a != 3) {
-           a++;
-         }
-         a;"
-      expect(program).toEvaluateTo 3
-      program = "
-         arr = [1,2,3];
-         for (i = 0; i < arr.length; i++) {
-           arr[i] *= arr[i];
-         }
-         arr;"
-      expect(program).toEvaluateTo [1, 4, 9]
+      it "repeats normally", ->
+        program = "
+           a = 0;
+           while (a != 3) {
+             a++;
+           }
+           a;"
+        expect(program).toEvaluateTo 3
+        program = "
+           arr = [1,2,3];
+           for (i = 0; i < arr.length; i++) {
+             arr[i] *= arr[i];
+           }
+           arr;"
+        expect(program).toEvaluateTo [1, 4, 9]
 
     it "checks the predicate when continuing in Do While loops", ->
       program = "
@@ -1028,6 +1035,20 @@ describe "The evaluator module", ->
          f();
          o;"
       expect(program).toEvaluateTo foo: 2
+
+    it "puts a prototype object on user functions", ->
+      program = "
+        f = function () {};
+        p = f.prototype;
+        [p, Object.getPrototypeOf(p) === Object.prototype]; "
+      expect(program).toEvaluateTo [{}, true]
+
+    it "prepopulates prototypes on user functions with a construction field", ->
+      program = "
+        f = function () {};
+        p = f.prototype;
+        [Object.getOwnPropertyNames(p), p.constructor === f]; "
+      expect(program).toEvaluateTo [["constructor"], true]
 
     it "uses function scope when calling functions", ->
       program = "
@@ -1109,109 +1130,111 @@ describe "The evaluator module", ->
          [a, f()];"
       expect(program).toEvaluateTo [0, 1]
 
-    it "jumps to the correct case in a switch statement", ->
-      program = "
-         a = 0;
-         switch (val) {
-         case 0:
-           a += 1;
-           break;
-         case 1:
-           a += 2;
-         case 2:
-           a += 3;
-           break;
-         }
-         a;"
-      evaluator.eval "val = 0"
-      expect(program).toEvaluateTo 1
-      evaluator.eval "val = 1"
-      expect(program).toEvaluateTo 5
-      evaluator.eval "val = 2"
-      expect(program).toEvaluateTo 3
-      evaluator.eval "val = 3" # Does not match any case
-      expect(program).toEvaluateTo 0
+    describe "a switch statement", ->
+      it "jumps to the correct case", ->
+        program = "
+           a = 0;
+           switch (val) {
+           case 0:
+             a += 1;
+             break;
+           case 1:
+             a += 2;
+           case 2:
+             a += 3;
+             break;
+           }
+           a;"
+        evaluator.eval "val = 0"
+        expect(program).toEvaluateTo 1
+        evaluator.eval "val = 1"
+        expect(program).toEvaluateTo 5
+        evaluator.eval "val = 2"
+        expect(program).toEvaluateTo 3
+        evaluator.eval "val = 3" # Does not match any case
+        expect(program).toEvaluateTo 0
 
-    it "will use the default case in a switch if no other cases match", ->
-      program = "
-        a = 0;
-        switch (val) {
-        case 0:
-          a += 1;
-        default:
-          a += 2;
-        case 1:
-          a += 3;
-        }
-        a;"
-      evaluator.eval "val = 0"
-      expect(program).toEvaluateTo 6
-      evaluator.eval "val = 1"
-      expect(program).toEvaluateTo 3
-      evaluator.eval "val = 2" # Default case
-      expect(program).toEvaluateTo 5
-
-    it "handles switch blocks with only a default case", ->
-      program = "
-        a = 0;
-        switch (0) {
-         default:
-           a++;
-        }
-        a;"
-      expect(program).toEvaluateTo 1
-
-    it "can continue and return from within switch statements", ->
-      program = "
-        f = function () {
-          var a = 0;
-          while (true) {
-            a++;
-            switch (a) {
-              case 1:
-                continue;
-              case 2:
-                return a;
-            }
+      it "will use the default case if no other cases match", ->
+        program = "
+          a = 0;
+          switch (val) {
+          case 0:
+            a += 1;
+          default:
+            a += 2;
+          case 1:
+            a += 3;
           }
-        };
-        f();"
-      expect(program).toEvaluateTo 2
+          a;"
+        evaluator.eval "val = 0"
+        expect(program).toEvaluateTo 6
+        evaluator.eval "val = 1"
+        expect(program).toEvaluateTo 3
+        evaluator.eval "val = 2" # Default case
+        expect(program).toEvaluateTo 5
 
-    it "short circuits case expression evalution", ->
-      program = "
-        obj = {a: 0, b: 0, c: 0};
-        incr = function (val) {obj[val]++; return val;};
-        switch('b') {
-          case incr('a'):
-          case incr('b'):
-          case incr('c'):
-        }
-        obj"
-      expect(program).toEvaluateTo a: 1, b: 1, c: 0
+      it "handles only a default case", ->
+        program = "
+          a = 0;
+          switch (0) {
+           default:
+             a++;
+          }
+          a;"
+        expect(program).toEvaluateTo 1
 
-    it "short circuits logical expression", ->
-      program = "
-        a = 0;
-        increment = function (val) {a++; return val};
-        res = increment('') && increment('hi');
-        [a, res];"
-      expect(program).toEvaluateTo [1, '']
+      it "can continue and return", ->
+        program = "
+          f = function () {
+            var a = 0;
+            while (true) {
+              a++;
+              switch (a) {
+                case 1:
+                  continue;
+                case 2:
+                  return a;
+              }
+            }
+          };
+          f();"
+        expect(program).toEvaluateTo 2
 
-      program = "
-        a = 0;
-        increment = function (val) {a++; return val};
-        res = increment('') && increment('hi') || increment('hello');
-        [a, res];"
-      expect(program).toEvaluateTo [2, "hello"]
+    describe "short circuits", ->
+      it "case expression evalution", ->
+        program = "
+          obj = {a: 0, b: 0, c: 0};
+          incr = function (val) {obj[val]++; return val;};
+          switch('b') {
+            case incr('a'):
+            case incr('b'):
+            case incr('c'):
+          }
+          obj"
+        expect(program).toEvaluateTo a: 1, b: 1, c: 0
 
-    it "short circuits ternary expressions", ->
-      program = "
-        obj = {a: 0, b: 0, c: 0};
-        incr = function (val) {obj[val]++; return val;};
-        res = incr('a') ? incr('b') : incr('c');
-        [obj, res];"
-      expect(program).toEvaluateTo [{a: 1, b: 1, c: 0}, 'b']
+      it "logical expression", ->
+        program = "
+          a = 0;
+          increment = function (val) {a++; return val};
+          res = increment('') && increment('hi');
+          [a, res];"
+        expect(program).toEvaluateTo [1, '']
+
+        program = "
+          a = 0;
+          increment = function (val) {a++; return val};
+          res = increment('') && increment('hi') || increment('hello');
+          [a, res];"
+        expect(program).toEvaluateTo [2, "hello"]
+
+      it "ternary expressions", ->
+        program = "
+          obj = {a: 0, b: 0, c: 0};
+          incr = function (val) {obj[val]++; return val;};
+          res = incr('a') ? incr('b') : incr('c');
+          [obj, res];"
+        expect(program).toEvaluateTo [{a: 1, b: 1, c: 0}, 'b']
 
     it "can delete variables in a scope", ->
       program = "
@@ -1695,117 +1718,170 @@ describe "The evaluator module", ->
         it "stores a reference to the function being called", ->
           expect("getArgs().callee").toEvaluateTo getArgs
 
-    it "can pause execution", ->
-      evaluator.scope.pauseExecFunc = ->
-        evaluator.pause()
-      program = "
-        pauseExecFunc();
-        5;"
-      callback = jasmine.createSpy()
-      evaluator.eval program, callback
-      expect(callback).not.toHaveBeenCalled()
+    describe "creating instances", ->
+      describe "from user defined functions", ->
+        it "calls the constructor with the instance as 'this'", ->
+          program = "
+            function Cls(arg) {
+              this.foo = 'hi';
+              this.bar = 'there';
+              this.myarg = arg;
+            }
+            instance = new Cls(5);
+            [instance.foo, instance.bar, instance.myarg]; "
+          expect(program).toEvaluateTo ["hi", "there", 5]
 
-    it "requires a context to resume execution", ->
-      context = null
-      evaluator.scope.pauseExecFunc = ->
-        context = evaluator.pause()
+        it "sets the prototype properly", ->
+          program = "
+            function Cls() {}
+            Cls.prototype.foo = 'hi';
+            Cls.prototype.bar = 'there';
+            a = new Cls();
+            b = new Cls();
+            initial = [a.foo, a.bar, b.foo, b.bar];
+            a.foo = 1;
+            a.bar = 2;
+            Cls.prototype.foo = 3;
+            Cls.prototype.bar = 4;
+            [initial, [a.foo, a.bar, b.foo, b.bar]]; "
+          expect(program).toEvaluateTo [["hi", "there", "hi", "there"], [1, 2, 3, 4]]
 
-      evaluator.scope.myObject = myObject = val: 0
-      program = "
-        f = function () {
-          myObject.val = 1;
+      describe "from native functions", ->
+        it "calls the native function", ->
+          evaluator.scope.Cls = (arg) ->
+            @foo = 'hi'
+            @bar = 'there'
+            @myarg = arg
+          program = "
+            instance = new Cls(5);
+            [instance.foo, instance.bar, instance.myarg]; "
+          expect(program).toEvaluateTo ["hi", "there", 5]
+
+        it "sets the prototype properly", ->
+          evaluator.scope.Cls = ->
+          program = "
+            Cls.prototype.foo = 'hi';
+            Cls.prototype.bar = 'there';
+            a = new Cls();
+            b = new Cls();
+            initial = [a.foo, a.bar, b.foo, b.bar];
+            a.foo = 1;
+            a.bar = 2;
+            Cls.prototype.foo = 3;
+            Cls.prototype.bar = 4;
+            [initial, [a.foo, a.bar, b.foo, b.bar]]; "
+          expect(program).toEvaluateTo [["hi", "there", "hi", "there"], [1, 2, 3, 4]]
+
+    describe "pausing execution", ->
+      it "won't call onComplete before execution finishes", ->
+        evaluator.scope.pauseExecFunc = ->
+          evaluator.pause()
+        program = "
           pauseExecFunc();
-          myObject.val = 2;
-        };
-        f();
-        pauseExecFunc();
-        myObject.val = 3;"
-      evaluator.eval program
-      expect(myObject.val).toEqual 1
+          5;"
+        callback = jasmine.createSpy()
+        evaluator.eval program, callback
+        expect(callback).not.toHaveBeenCalled()
 
-      errorMessage = "Resuming evaluation requires a context as returned by pause."
-      expect(-> evaluator.resume()).toThrow(errorMessage)
-      expect(myObject.val).toEqual 1
+      it "requires a context to resume execution", ->
+        context = null
+        evaluator.scope.pauseExecFunc = ->
+          context = evaluator.pause()
 
-      evaluator.resume(context)
-      expect(myObject.val).toEqual 2
-
-      expect(-> evaluator.resume({})).toThrow("Invalid context given to resume.")
-      expect(myObject.val).toEqual 2
-
-      evaluator.resume(context)
-      expect(myObject.val).toEqual 3
-
-    it "can resume into different contexts", ->
-      context = null
-      evaluator.scope.pauseExecFunc = ->
-        context = evaluator.pause()
-
-      evaluator.scope.obj1 = obj1 = val: 0
-      evaluator.scope.obj2 = obj2 = val: 0
-      program1 =
-        "f = function () {
-          obj1.val = 1;
+        evaluator.scope.myObject = myObject = val: 0
+        program = "
+          f = function () {
+            myObject.val = 1;
+            pauseExecFunc();
+            myObject.val = 2;
+          };
+          f();
           pauseExecFunc();
-          obj1.val = 2;
-        };
-        f();
-        pauseExecFunc();
-        obj1.val = 3;"
-      program2 =
-        "f = function () {
-          obj2.val = 1;
+          myObject.val = 3;"
+        evaluator.eval program
+        expect(myObject.val).toEqual 1
+
+        errorMessage = "Resuming evaluation requires a context as returned by pause."
+        expect(-> evaluator.resume()).toThrow(errorMessage)
+        expect(myObject.val).toEqual 1
+
+        evaluator.resume(context)
+        expect(myObject.val).toEqual 2
+
+        expect(-> evaluator.resume({})).toThrow("Invalid context given to resume.")
+        expect(myObject.val).toEqual 2
+
+        evaluator.resume(context)
+        expect(myObject.val).toEqual 3
+
+      it "can resume into different contexts", ->
+        context = null
+        evaluator.scope.pauseExecFunc = ->
+          context = evaluator.pause()
+
+        evaluator.scope.obj1 = obj1 = val: 0
+        evaluator.scope.obj2 = obj2 = val: 0
+        program1 =
+          "f = function () {
+            obj1.val = 1;
+            pauseExecFunc();
+            obj1.val = 2;
+          };
+          f();
           pauseExecFunc();
-          obj2.val = 2;
-        };
-        f();
-        pauseExecFunc();
-        obj2.val = 3;"
+          obj1.val = 3;"
+        program2 =
+          "f = function () {
+            obj2.val = 1;
+            pauseExecFunc();
+            obj2.val = 2;
+          };
+          f();
+          pauseExecFunc();
+          obj2.val = 3;"
 
-      evaluator.eval program1
-      context1 = context
-      expect(obj1.val).toEqual 1
-      expect(obj2.val).toEqual 0
+        evaluator.eval program1
+        context1 = context
+        expect(obj1.val).toEqual 1
+        expect(obj2.val).toEqual 0
 
-      evaluator.eval program2
-      context2 = context
-      expect(obj1.val).toEqual 1
-      expect(obj2.val).toEqual 1
+        evaluator.eval program2
+        context2 = context
+        expect(obj1.val).toEqual 1
+        expect(obj2.val).toEqual 1
 
-      evaluator.resume(context2)
-      expect(obj1.val).toEqual 1
-      expect(obj2.val).toEqual 2
+        evaluator.resume(context2)
+        expect(obj1.val).toEqual 1
+        expect(obj2.val).toEqual 2
 
-      evaluator.resume(context1)
-      expect(obj1.val).toEqual 2
-      expect(obj2.val).toEqual 2
+        evaluator.resume(context1)
+        expect(obj1.val).toEqual 2
+        expect(obj2.val).toEqual 2
 
-      evaluator.resume(context1)
-      expect(obj1.val).toEqual 3
-      expect(obj2.val).toEqual 2
+        evaluator.resume(context1)
+        expect(obj1.val).toEqual 3
+        expect(obj2.val).toEqual 2
 
-      evaluator.resume(context2)
-      expect(obj1.val).toEqual 3
-      expect(obj2.val).toEqual 3
+        evaluator.resume(context2)
+        expect(obj1.val).toEqual 3
+        expect(obj2.val).toEqual 3
 
-    it "calls the onComplete function even after pausing and resuming", ->
-      context = null
-      evaluator.scope.pauseExecFunc = ->
-        context = evaluator.pause()
+      it "calls the onComplete function even after pausing and resuming", ->
+        context = null
+        evaluator.scope.pauseExecFunc = ->
+          context = evaluator.pause()
 
-      program = "
-        pauseExecFunc();
-        'foobar';"
-      doneCallback = jasmine.createSpy()
+        program = "
+          pauseExecFunc();
+          'foobar';"
+        doneCallback = jasmine.createSpy()
 
-      evaluator.eval program, doneCallback
-      expect(doneCallback).not.toHaveBeenCalled()
-      evaluator.resume(context)
-      expect(doneCallback).toHaveBeenCalledWith "foobar", false
+        evaluator.eval program, doneCallback
+        expect(doneCallback).not.toHaveBeenCalled()
+        evaluator.resume(context)
+        expect(doneCallback).toHaveBeenCalledWith "foobar", false
 
 # Todo: Handle creation of proper prototype chains on functions
-# Todo: Test 'new' object creation calling Object.create ourselves and then
-#   calling the constructor with the created object as the 'this' parameter.
 # Todo: If result is a promise (some other way to tell that it is our function?
 #   our function will tell the evaluator that the next thing is a promise?)
 #   then wait for it to be done and re-start evaluation.
@@ -1821,3 +1897,4 @@ describe "The evaluator module", ->
 # Todo: Skipping labels, not allowing labelled breaks/continues for now
 # Todo: Parentheses for order of operations, eg new (foo()) ();
 # Todo: Use the field names the parser uses
+# Todo: Functions should implicitly return undefined

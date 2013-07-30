@@ -328,7 +328,10 @@ class FunctionDefinition
   constructor: (@name, @params, @body, @tempVar=null) ->
   updateState: (context) ->
     targetLocation = @tempVar or @name
-    context.setValue targetLocation, new Closure(this, context.getEnvironment())
+    closure = new Closure(this, context.getEnvironment())
+    closure.prototype = new context.scope.Object()
+    closure.prototype.constructor = closure
+    context.setValue targetLocation, closure
 
 class FunctionCall
   constructor: (@callee, @args, @tempVar) ->
@@ -344,7 +347,7 @@ class FunctionCall
       argValues = (context.eval(arg) for arg in @args)
       context.pushState func.getInstructions(), this, func.getEnvironment(argValues), thisObject
     else
-      context.eval @tempVar + " = " + functionLocation + "(" + @args.join(", ") + ")"
+      context.eval "#{@tempVar} = #{functionLocation}(#{@args.join(", ")})"
 
   canReturn: -> true
   canCatch: -> false
@@ -354,6 +357,16 @@ class FunctionCall
 
 class NewObject
   constructor: (@callee, @args, @tempVar) ->
+  updateState: (context) ->
+    func = context.eval @callee
+    if func instanceof Closure
+      instance = Object.create(func.prototype)
+      context.setValue @tempVar, instance
+      argValues = (context.eval(arg) for arg in @args)
+      context.pushState func.getInstructions(), this, func.getEnvironment(argValues), instance
+    else
+      context.eval "#{@tempVar} = new #{@callee}(#{@args.join(", ")})"
+
 
 class Return
   constructor: (@value) ->
