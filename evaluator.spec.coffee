@@ -309,13 +309,14 @@ describe "The evaluator module", ->
         )
 
       it "extracts declared functions", ->
-        original =
-          "obj = {msg: 'hi'};" +
-          "function foo(a, b) {" +
-          "  a[b] = 'foo'" +
-          "}" +
-          "var bar = function bar() {};"
-        bytecode = getStatementsBytecode(original)
+        bytecode = getStatementsBytecode("
+          obj = {msg: 'hi'};
+          function foo(a, b) {
+            a[b] = 'foo'
+          }
+          var bar = function bar() {};
+        ")
+
         expect(bytecode.declaredVariables).toEqual ["bar"]
         declaredFuncs = bytecode.declaredFunctions
         expect(declaredFuncs.length).toEqual 1
@@ -341,17 +342,17 @@ describe "The evaluator module", ->
         )
 
       it "creates if statements with function scope", ->
-        bytecode = getStatementsBytecode(
-          "var myval = 'hi';" +
-          "if (!isHi(myval)) {" +
-          "  var a = 1;" +
-          "} else {" +
-          "  var b = 2;" +
-          "  function inside() {}" +
-          "}" +
-          "function isHi(val) {return val === 'hi'}" +
-          "var c = 'hello';"
-        )
+        bytecode = getStatementsBytecode("
+          var myval = 'hi';
+          if (!isHi(myval)) {
+            var a = 1;
+          } else {
+            var b = 2;
+            function inside() {}
+          }
+          function isHi(val) {return val === 'hi'}
+          var c = 'hello';
+        ")
         expect(bytecode.declaredVariables).toEqual ["myval", "a", "b", "c"]
         declaredFuncs = bytecode.declaredFunctions
         expect(declaredFuncs.length).toEqual 2
@@ -368,32 +369,32 @@ describe "The evaluator module", ->
         expect(bytecode.instructions[3]).toHaveSameAST "c = 'hello'"
 
       it "handles if statements without else blocks", ->
-        bytecode = getStatementsBytecode(
-          "if (predicate) {" +
-          "  a = 1;" +
-          "}"
-        )
+        bytecode = getStatementsBytecode("
+          if (predicate) {
+            a = 1;
+          }
+        ")
         expect(bytecode.instructions.length).toEqual 1
         ifStatement = bytecode.instructions[0]
         expect(ifStatement.thenCase).toHaveSameAST ["a = 1"]
         expect(ifStatement.elseCase).toEqual []
 
       it "ignores labels", ->
-        original =
-          "foo:" +
-          "{" +
-          "  a = 1;" +
-          "  bar: a++" +
-          "}"
+        original = "
+          foo:
+          {
+            a = 1;
+            bar: a++
+          }"
         expectStatementsEqual original, ["a = 1", "a++"]
 
       it "creates With blocks with function scope", ->
-        bytecode = getStatementsBytecode(
-          "with (getEnv()) {" +
-          "  var a = 1;" +
-          "  function b () {}" +
-          "}"
-        )
+        bytecode = getStatementsBytecode("
+          with (getEnv()) {
+            var a = 1;
+            function b () {}
+          }
+        ")
         expect(bytecode.declaredVariables).toEqual ["a"]
         expect(bytecode.declaredFunctions.length).toEqual 1
         expect(bytecode.declaredFunctions[0]).toBeFunctionDef "b", [], "", null
@@ -404,17 +405,17 @@ describe "The evaluator module", ->
 
       describe "creating Switch blocks", ->
         it "desugars case evaluation and flattens all statements", ->
-          bytecode = getStatementsBytecode(
-            "switch (val()) {" +
-            "case first:" +
-            "  a = 2;" +
-            "  b(a);" +
-            "case 'second':" +
-            "  a = 5;" +
-            "case third():" +
-            "  a++;" +
-            "}"
-          )
+          bytecode = getStatementsBytecode("
+            switch (val()) {
+            case first:
+              a = 2;
+              b(a);
+            case 'second':
+              a = 5;
+            case third():
+              a++;
+            }
+          ")
           # This should desugar to:
           #   temp1 = val()
           #   if temp1 == first
@@ -469,15 +470,15 @@ describe "The evaluator module", ->
           expect(inst[4]).toHaveSameAST "a++"
 
         it "has function scope", ->
-          bytecode = getStatementsBytecode(
-            "switch (foo().val) {" +
-            "case first:" +
-            "  var a = 2;" +
-            "case 'second':" +
-            "  var b = 5;" +
-            "  function c(d) {e}" +
-            "}"
-          )
+          bytecode = getStatementsBytecode("
+            switch (foo().val) {
+            case first:
+              var a = 2;
+            case 'second':
+              var b = 5;
+              function c(d) {e}
+            }
+          ")
           expect(bytecode.declaredVariables).toEqual ["a", "b"]
           expect(bytecode.declaredFunctions.length).toEqual 1
           expect(bytecode.declaredFunctions[0]).toBeFunctionDef "c", ["d"], "e", null
@@ -489,16 +490,16 @@ describe "The evaluator module", ->
           expect(inst[2].startPCVar).toEqual tempName(0)
 
         it "stores a default index", ->
-          bytecode = getStatementsBytecode(
-            "switch (val) {" +
-            "case 'foo':" +
-            "  a = 2;" +
-            "default:" +
-            "  a = 4;" +
-            "case 'bar':" +
-            "  a = 6;" +
-            "}"
-          )
+          bytecode = getStatementsBytecode("
+            switch (val) {
+            case 'foo':
+              a = 2;
+            default:
+              a = 4;
+            case 'bar':
+              a = 6;
+            }
+          ")
           # This should desugar to:
           #   if val == 'foo'
           #     temp = 0 // instruction index of "case 'foo':"
@@ -527,22 +528,22 @@ describe "The evaluator module", ->
           expect(switchStatement.startPCVar).toEqual temp
 
       it "creates break statements", ->
-        bytecode = getStatementsBytecode(
-          "switch (val) {" +
-          "case 'foo':" +
-          "  break;" +
-          "}"
-        )
+        bytecode = getStatementsBytecode("
+          switch (val) {
+          case 'foo':
+            break;
+          }
+        ")
         switchStatement = bytecode.instructions[1]
         breakStatement = switchStatement.instructions[0]
         expect(breakStatement).toEqual jasmine.any(Evaluator.Break)
 
       it "does not allow break statements to have labels", ->
-        original =
-          "switch (val) {" +
-          "case 'foo':" +
-          "  lbl:break lbl;" +
-          "}"
+        original = "
+          switch (val) {
+          case 'foo':
+            lbl:break lbl;
+          }"
         expect(->
           getStatementsBytecode original
         ).toThrow "Does not support labelled breaks."
@@ -550,33 +551,33 @@ describe "The evaluator module", ->
       
       # Note that the tests for while and the tests for continue rely on each other
       it "creates continue statements", ->
-        bytecode = getStatementsBytecode(
-          "while (true) {" +
-          "  continue;" +
-          "};"
-        )
+        bytecode = getStatementsBytecode("
+          while (true) {
+            continue;
+          };
+        ")
         whileStatement = bytecode.instructions[0]
         continueStatement = whileStatement.instructions[1]
         expect(continueStatement).toEqual jasmine.any(Evaluator.Continue)
 
       it "doesn't allow labelled continues", ->
-        original =
-          "lbl:" +
-          "while (true) {" +
-          "  continue lbl;" +
-          "};"
+        original = "
+          lbl:
+          while (true) {
+            continue lbl;
+          };"
         expect(->
           getStatementsBytecode original
         ).toThrow "Does not support labelled continues."
 
       describe "creating While loops", ->
         it "desugars it into a loop", ->
-          bytecode = getStatementsBytecode(
-            "while (!shouldStop()) {" +
-            "  a = 1 + 2;" +
-            "  a++;" +
-            "}"
-          )
+          bytecode = getStatementsBytecode("
+            while (!shouldStop()) {
+              a = 1 + 2;
+              a++;
+            }
+          ")
           
           # This should desugar to:
           #  temp = shouldStop()
@@ -605,12 +606,12 @@ describe "The evaluator module", ->
           expect(loopInstr.instructions[4]).toEqual jasmine.any(Evaluator.Continue)
 
         it "uses function scope", ->
-          bytecode = getStatementsBytecode(
-            "while (true) {" +
-            "  var a = 1 + 2;" +
-            "  function b(c) {d};" +
-            "}"
-          )
+          bytecode = getStatementsBytecode("
+            while (true) {
+              var a = 1 + 2;
+              function b(c) {d};
+            }
+          ")
           expect(bytecode.declaredVariables).toEqual ["a"]
           expect(bytecode.declaredFunctions.length).toEqual 1
           expect(bytecode.declaredFunctions[0]).toBeFunctionDef "b", ["c"], "d", null
@@ -618,12 +619,12 @@ describe "The evaluator module", ->
 
       describe "creating Do While loops", ->
         it "unrolls one execution and desugars it into a loop", ->
-          bytecode = getStatementsBytecode(
-            "do {" +
-            "  a = 1 + 2;" +
-            "  a++;" +
-            "} while (!shouldStop());"
-          )
+          bytecode = getStatementsBytecode("
+            do {
+              a = 1 + 2;
+              a++;
+            } while (!shouldStop());
+          ")
           
           # This should desugar to:
           #  temp = shouldStop()
@@ -652,23 +653,23 @@ describe "The evaluator module", ->
           expect(loopInstr.instructions[4]).toEqual jasmine.any(Evaluator.Continue)
 
         it "uses function scope", ->
-          bytecode = getStatementsBytecode(
-            "do {" +
-            "  var a = 1 + 2;" +
-            "  function b(c) {d};" +
-            "} while (true);"
-          )
+          bytecode = getStatementsBytecode("
+            do {
+              var a = 1 + 2;
+              function b(c) {d};
+            } while (true);
+          ")
           expect(bytecode.declaredVariables).toEqual ["a"]
           expect(bytecode.declaredFunctions.length).toEqual 1
           expect(bytecode.declaredFunctions[0]).toBeFunctionDef "b", ["c"], "d", null
 
       describe "creating For loops", ->
         it "desugars it into a flat loop", ->
-          bytecode = getStatementsBytecode(
-            "for (i = initVar(); i !== lst().length; i++) {" +
-            "  a.push(i + 1);" +
-            "}"
-          )
+          bytecode = getStatementsBytecode("
+            for (i = initVar(); i !== lst().length; i++) {
+              a.push(i + 1);
+            }
+          ")
           
           # The initializer should be pulled out before the loop. The loop
           # should desugar to:
@@ -703,12 +704,12 @@ describe "The evaluator module", ->
           expect(loopInstr.instructions[5]).toEqual jasmine.any(Evaluator.Continue)
 
         it "uses function scope", ->
-          bytecode = getStatementsBytecode(
-            "for (var i = init; i != 0; --i) {" +
-            "  var a = 1 + 2;" +
-            "  function b(c) {d};" +
-            "};"
-          )
+          bytecode = getStatementsBytecode("
+            for (var i = init; i != 0; --i) {
+              var a = 1 + 2;
+              function b(c) {d};
+            };
+          ")
           expect(bytecode.declaredVariables).toEqual ["i", "a"]
           expect(bytecode.declaredFunctions.length).toEqual 1
           expect(bytecode.declaredFunctions[0]).toBeFunctionDef "b", ["c"], "d", null
@@ -752,15 +753,15 @@ describe "The evaluator module", ->
 
       describe "creating Try Catch Finally blocks", ->
         it "stores the instructions in the try, catch and finally block", ->
-          bytecode = getStatementsBytecode(
-            "try {" +
-            "  a = 1; b = a + 'hi';" +
-            "} catch (err) {" +
-            "  c = 2; d;" +
-            "} finally {" +
-            "  e + f * g" +
-            "}"
-          )
+          bytecode = getStatementsBytecode("
+            try {
+              a = 1; b = a + 'hi';
+            } catch (err) {
+              c = 2; d;
+            } finally {
+              e + f * g
+            }
+          ")
           expect(bytecode.instructions.length).toEqual 1
           tryStatement = bytecode.instructions[0]
           expect(tryStatement).toEqual jasmine.any(Evaluator.Try)
@@ -770,18 +771,18 @@ describe "The evaluator module", ->
           expect(tryStatement.finallyBlock).toHaveSameAST ["e + f * g"]
 
         it "uses function scope", ->
-          bytecode = getStatementsBytecode(
-            "try {" +
-            "  var a;" +
-            "  function b() {}" +
-            "} catch (e) {" +
-            "  var c;" +
-            "  function d() {}" +
-            "} finally {" +
-            "  var e;" +
-            "  function f() {}" +
-            "}"
-          )
+          bytecode = getStatementsBytecode("
+            try {
+              var a;
+              function b() {}
+            } catch (e) {
+              var c;
+              function d() {}
+            } finally {
+              var e;
+              function f() {}
+            }
+          ")
           expect(bytecode.declaredVariables).toEqual ['a', 'c', 'e']
           expect(bytecode.declaredFunctions.length).toEqual 3
           expect(bytecode.declaredFunctions[0]).toBeFunctionDef 'b', [], '', null
@@ -789,13 +790,13 @@ describe "The evaluator module", ->
           expect(bytecode.declaredFunctions[2]).toBeFunctionDef 'f', [], '', null
 
         it "handles empty catch blocks", ->
-          bytecode = getStatementsBytecode(
-            "try {" +
-            "  a; b;" +
-            "} finally {" +
-            "  c; d;" +
-            "}"
-          )
+          bytecode = getStatementsBytecode("
+            try {
+              a; b;
+            } finally {
+              c; d;
+            }
+          ")
           expect(bytecode.instructions.length).toEqual 1
           tryStatement = bytecode.instructions[0]
           expect(tryStatement).toEqual jasmine.any(Evaluator.Try)
@@ -805,13 +806,13 @@ describe "The evaluator module", ->
           expect(tryStatement.finallyBlock).toHaveSameAST ["c", "d"]
 
         it "handles empty finally blocks", ->
-          bytecode = getStatementsBytecode(
-            "try {" +
-            "  a; b;" +
-            "} catch(e) {" +
-            "  c; d;" +
-            "}"
-          )
+          bytecode = getStatementsBytecode("
+            try {
+              a; b;
+            } catch(e) {
+              c; d;
+            }
+          ")
           expect(bytecode.instructions.length).toEqual 1
           tryStatement = bytecode.instructions[0]
           expect(tryStatement).toEqual jasmine.any(Evaluator.Try)
@@ -899,99 +900,100 @@ describe "The evaluator module", ->
         expect(inputString).toEvaluateTo outputValue
 
     it "conditionally executes code in If blocks", ->
-      program =
-        "a = 0;" +
-        "if (val) {" +
-        "  a += 1;" +
-        "} else {" +
-        "  a += 2;" +
-        "}" +
-        "a;"
+      program = "
+        a = 0;
+         if (val) {
+           a += 1;
+         } else {
+           a += 2;
+         }
+         a;
+      "
       evaluator.eval "val = true"
       expect(program).toEvaluateTo 1
       evaluator.eval "val = false"
       expect(program).toEvaluateTo 2
 
     it "can break out of loops", ->
-      program =
-        "a = 0;" +
-        "while (true) {" +
-        "  break;" +
-        "  a = 1;" +
-        "}" +
-        "a;"
+      program = "
+         a = 0;
+         while (true) {
+           break;
+           a = 1;
+         }
+         a;"
       expect(program).toEvaluateTo 0
 
     it "can break out of nested blocks", ->
-      program =
-        "a = 0;" +
-        "while (true) {" +
-        "  if (true) break;" +
-        "  a = 1;" +
-        "}" +
-        "a;"
+      program = "
+         a = 0;
+         while (true) {
+           if (true) break;
+           a = 1;
+         }
+         a;"
       expect(program).toEvaluateTo 0
-      program =
-        "a = 0;" +
-        "do {" +
-        "  while (true) {" +
-        "    if (true) break;" +
-        "    a += 1;" +
-        "  }" +
-        "  a += 2" +
-        "} while (false)" +
-        "a;"
+      program = "
+         a = 0;
+         do {
+           while (true) {
+             if (true) break;
+             a += 1;
+           }
+           a += 2
+         } while (false)
+         a;"
       expect(program).toEvaluateTo 2
 
     it "can continue in loops", ->
-      program =
-        "a = 0;" +
-        "while (true) {" +
-        "  if (a > 0) break;" +
-        "  a++;" +
-        "  continue;" +
-        "  a = 5;" +
-        "}" +
-        "a;"
+      program = "
+         a = 0;
+         while (true) {
+           if (a > 0) break;
+           a++;
+           continue;
+           a = 5;
+         }
+         a;"
       expect(program).toEvaluateTo 1
 
     it "can continue in nested blocks", ->
-      program =
-        "a = 0;" +
-        "while (true) {" +
-        "  if (a > 0) break;" +
-        "  a++;" +
-        "  if (true) continue;" +
-        "  a = 5;" +
-        "}" +
-        "a;"
+      program = "
+         a = 0;
+         while (true) {
+           if (a > 0) break;
+           a++;
+           if (true) continue;
+           a = 5;
+         }
+         a;"
       expect(program).toEvaluateTo 1
 
     it "repeats loops normally", ->
-      program =
-        "a = 0;" +
-        "while (a != 3) {" +
-        "  a++;" +
-        "}" +
-        "a;"
+      program = "
+         a = 0;
+         while (a != 3) {
+           a++;
+         }
+         a;"
       expect(program).toEvaluateTo 3
-      program =
-        "arr = [1,2,3];" +
-        "for (i = 0; i < arr.length; i++) {" +
-        "  arr[i] *= arr[i];" +
-        "}" +
-        "arr;"
+      program = "
+         arr = [1,2,3];
+         for (i = 0; i < arr.length; i++) {
+           arr[i] *= arr[i];
+         }
+         arr;"
       expect(program).toEvaluateTo [1, 4, 9]
 
     it "checks the predicate when continuing in Do While loops", ->
-      program =
-        "a = 0;" +
-        "do {" +
-        "  a++;" +
-        "  if (a > 1) break;" +
-        "  continue;" +
-        "} while (false)" +
-        "a"
+      program = "
+         a = 0;
+         do {
+           a++;
+           if (a > 1) break;
+           continue;
+         } while (false)
+         a"
       expect(program).toEvaluateTo 1
 
     it "will call native functions", ->
@@ -1001,109 +1003,109 @@ describe "The evaluator module", ->
       expect(myNativeFunc).toHaveBeenCalledWith "hi", false
 
     it "can define and call user functions", ->
-      program =
-        "o = {foo: 1};" +
-        "f = function () {" +
-        "  o.foo += 1;" +
-        "};" +
-        "f();" +
-        "o;"
+      program = "
+         o = {foo: 1};
+         f = function () {
+           o.foo += 1;
+         };
+         f();
+         o;"
       expect(program).toEvaluateTo foo: 2
 
     it "uses function scope when calling functions", ->
-      program =
-        "a = 1;" +
-        "b = 2;" +
-        "c = 3;" +
-        "f = function (a) {" +
-        "  a += 1;" +
-        "  var b = 6;" +
-        "  c = a + b;" +
-        "};" +
-        "f(4);" +
-        "[a, b, c];"
+      program = "
+         a = 1;
+         b = 2;
+         c = 3;
+         f = function (a) {
+           a += 1;
+           var b = 6;
+           c = a + b;
+         };
+         f(4);
+         [a, b, c];"
       evaluator.eval "val = 3"
       expect(program).toEvaluateTo [1, 2, 11]
 
     it "can return values", ->
-      program =
-        "increment = function (val) {" +
-        "  return val + 1;" +
-        "};" +
-        "increment(5);"
+      program = "
+         increment = function (val) {
+           return val + 1;
+         };
+         increment(5);"
       expect(program).toEvaluateTo 6
 
     it "handles nested functions and has closures", ->
-      program =
-        "counter = function () {" +
-        "  var count = 0;" +
-        "  return function () {" +
-        "    return count++;" +
-        "  };" +
-        "};" +
-        "firstCounter = counter();" +
-        "firstRes = [];" +
-        "firstRes.push(firstCounter());" +
-        "firstRes.push(firstCounter());" +
-        "secondCounter = counter();" +
-        "secondRes = [];" +
-        "secondRes.push(secondCounter());" +
-        "firstRes.push(firstCounter());" +
-        "secondRes.push(secondCounter());" +
-        "secondRes.push(secondCounter());" +
-        "firstRes.push(firstCounter());" +
-        "firstRes.push(firstCounter());" +
-        "[firstRes, secondRes]"
+      program = "
+         counter = function () {
+           var count = 0;
+           return function () {
+             return count++;
+           };
+         };
+         firstCounter = counter();
+         firstRes = [];
+         firstRes.push(firstCounter());
+         firstRes.push(firstCounter());
+         secondCounter = counter();
+         secondRes = [];
+         secondRes.push(secondCounter());
+         firstRes.push(firstCounter());
+         secondRes.push(secondCounter());
+         secondRes.push(secondCounter());
+         firstRes.push(firstCounter());
+         firstRes.push(firstCounter());
+         [firstRes, secondRes]"
       expect(program).toEvaluateTo [[0, 1, 2, 3, 4], [0, 1, 2]]
 
     it "uses enclosing scopes for control blocks", ->
-      program =
-        "f = function (bool, secondBool) {" +
-        "  var a;" +
-        "  if (bool) {" +
-        "    a = 'first';" +
-        "  } else if (secondBool) {" +
-        "    a = 'second';" +
-        "  } else {" +
-        "    a = 'third';" +
-        "  }" +
-        "  return a;" +
-        "};" +
-        "[f(true, true), f(true, false), f(false, true), f(false, false)];"
+      program = "
+         f = function (bool, secondBool) {
+           var a;
+           if (bool) {
+             a = 'first';
+           } else if (secondBool) {
+             a = 'second';
+           } else {
+             a = 'third';
+           }
+           return a;
+         };
+         [f(true, true), f(true, false), f(false, true), f(false, false)];"
       expect(program).toEvaluateTo ['first', 'first', 'second', 'third']
 
     it "defines declared functions at the beginning of the scope", ->
-      program =
-        "function f() {return 1;}" +
-        "a = f;" +
-        "function f() {return 2;}" +
-        "[a === f, a(), f()];"
+      program = "
+         function f() {return 1;}
+         a = f;
+         function f() {return 2;}
+         [a === f, a(), f()];"
       expect(program).toEvaluateTo [true, 2, 2]
 
     it "defines declared functions locally within other functions", ->
-      program =
-        "a = 0;" +
-        "function f() {" +
-        "  return a();" +
-        "  function a() {return 1;}" +
-        "}" +
-        "[a, f()];"
+      program = "
+         a = 0;
+         function f() {
+           return a();
+           function a() {return 1;}
+         }
+         [a, f()];"
       expect(program).toEvaluateTo [0, 1]
 
     it "jumps to the correct case in a switch statement", ->
-      program =
-        "a = 0;" +
-        "switch (val) {" +
-        "case 0:" +
-        "  a += 1;" +
-        "  break;" +
-        "case 1:" +
-        "  a += 2;" +
-        "case 2:" +
-        "  a += 3;" +
-        "  break;" +
-        "}" +
-        "a;"
+      program = "
+         a = 0;
+         switch (val) {
+         case 0:
+           a += 1;
+           break;
+         case 1:
+           a += 2;
+         case 2:
+           a += 3;
+           break;
+         }
+         a;"
       evaluator.eval "val = 0"
       expect(program).toEvaluateTo 1
       evaluator.eval "val = 1"
@@ -1114,17 +1116,17 @@ describe "The evaluator module", ->
       expect(program).toEvaluateTo 0
 
     it "will use the default case in a switch if no other cases match", ->
-      program =
-        "a = 0;" +
-        "switch (val) {" +
-        "case 0:" +
-        "  a += 1;" +
-        "default:" +
-        "  a += 2;" +
-        "case 1:" +
-        "  a += 3;" +
-        "}" +
-        "a;"
+      program = "
+        a = 0;
+        switch (val) {
+        case 0:
+          a += 1;
+        default:
+          a += 2;
+        case 1:
+          a += 3;
+        }
+        a;"
       evaluator.eval "val = 0"
       expect(program).toEvaluateTo 6
       evaluator.eval "val = 1"
@@ -1133,90 +1135,90 @@ describe "The evaluator module", ->
       expect(program).toEvaluateTo 5
 
     it "handles switch blocks with only a default case", ->
-      program =
-        "a = 0;" +
-        "switch (0) {" +
-        " default:" +
-        "   a++;" +
-        "}" +
-        "a;"
+      program = "
+        a = 0;
+        switch (0) {
+         default:
+           a++;
+        }
+        a;"
       expect(program).toEvaluateTo 1
 
     it "can continue and return from within switch statements", ->
-      program =
-        "f = function () {" +
-        "  var a = 0;" +
-        "  while (true) {" +
-        "    a++;" +
-        "    switch (a) {" +
-        "      case 1:" +
-        "        continue;" +
-        "      case 2:" +
-        "        return a;" +
-        "    }" +
-        "  }" +
-        "};" +
-        "f();"
+      program = "
+        f = function () {
+          var a = 0;
+          while (true) {
+            a++;
+            switch (a) {
+              case 1:
+                continue;
+              case 2:
+                return a;
+            }
+          }
+        };
+        f();"
       expect(program).toEvaluateTo 2
 
     it "short circuits case expression evalution", ->
-      program =
-        "obj = {a: 0, b: 0, c: 0};" +
-        "incr = function (val) {obj[val]++; return val;};" +
-        "switch('b') {" +
-        "  case incr('a'):" +
-        "  case incr('b'):" +
-        "  case incr('c'):" +
-        "}" +
-        "obj"
+      program = "
+        obj = {a: 0, b: 0, c: 0};
+        incr = function (val) {obj[val]++; return val;};
+        switch('b') {
+          case incr('a'):
+          case incr('b'):
+          case incr('c'):
+        }
+        obj"
       expect(program).toEvaluateTo a: 1, b: 1, c: 0
 
     it "short circuits logical expression", ->
-      program =
-        "a = 0;" +
-        "increment = function (val) {a++; return val};" +
-        "res = increment('') && increment('hi');" +
-        "[a, res];"
+      program = "
+        a = 0;
+        increment = function (val) {a++; return val};
+        res = increment('') && increment('hi');
+        [a, res];"
       expect(program).toEvaluateTo [1, '']
 
-      program =
-        "a = 0;" +
-        "increment = function (val) {a++; return val};" +
-        "res = increment('') && increment('hi') || increment('hello');" +
-        "[a, res];"
+      program = "
+        a = 0;
+        increment = function (val) {a++; return val};
+        res = increment('') && increment('hi') || increment('hello');
+        [a, res];"
       expect(program).toEvaluateTo [2, "hello"]
 
     it "short circuits ternary expressions", ->
-      program =
-        "obj = {a: 0, b: 0, c: 0};" +
-        "incr = function (val) {obj[val]++; return val;};" +
-        "res = incr('a') ? incr('b') : incr('c');" +
-        "[obj, res];"
+      program = "
+        obj = {a: 0, b: 0, c: 0};
+        incr = function (val) {obj[val]++; return val;};
+        res = incr('a') ? incr('b') : incr('c');
+        [obj, res];"
       expect(program).toEvaluateTo [{a: 1, b: 1, c: 0}, 'b']
 
     it "can delete variables in a scope", ->
-      program =
-        "a = 0;" +
-        "f = function () {" +
-        "  var arr = [];" +
-        "  var a = 4;" +
-        "  arr.push(a);" +
-        "  delete a;" +
-        "  arr.push(a);" +
-        "  arr.push('a' in window);" +
-        "  delete a;" +
-        "  arr.push('a' in window);" +
-        "  return arr;" +
-        "};" +
-        "f();"
+      program = "
+        a = 0;
+        f = function () {
+          var arr = [];
+          var a = 4;
+          arr.push(a);
+          delete a;
+          arr.push(a);
+          arr.push('a' in window);
+          delete a;
+          arr.push('a' in window);
+          return arr;
+        };
+        f();"
       expect(program).toEvaluateTo [4, 0, true, false]
 
     it "prevents over writing of in use temporary variables", ->
-      program =
-        "function makeBools(first, second) {" +
-        "  return [Boolean(first), Boolean(second)];" +
-        "}" +
-        "[makeBools(0, '0'), makeBools('null', null)];"
+      program = "
+        function makeBools(first, second) {
+          return [Boolean(first), Boolean(second)];
+        }
+        [makeBools(0, '0'), makeBools('null', null)];"
       expect(program).toEvaluateTo [[false, true], [true, false]]
 
     it "sets the function's name as a variable that points to the function inside " +
@@ -1225,75 +1227,75 @@ describe "The evaluator module", ->
       # (not a declaration, but the function is assigned to a variable) then whenever
       # you call that function, the name of the function is a variable within the scope
       # of the function, but it is not available outside the function
-      program =
-        "function foo() {return foo;}" +
-        "a = foo;" +
-        "foo = 1;" +
-        "a();"
+      program = "
+        function foo() {return foo;}
+        a = foo;
+        foo = 1;
+        a();"
       expect(program).toEvaluateTo 1
 
-      program =
-        "delete foo;" + # Get rid of it from previous tests
-        "bar = function foo() {return foo;};" +
-        "fooExists = 'foo' in window;" +
-        "foo = 1;" +
-        "[bar() === bar, fooExists];"
+      program = "
+        delete foo;" + # Get rid of it from previous tests
+        "bar = function foo() {return foo;};
+        fooExists = 'foo' in window;
+        foo = 1;
+        [bar() === bar, fooExists];"
       expect(program).toEvaluateTo [true, false]
 
     it "extends the environment in With blocks", ->
-      program =
-        "myenv = {a: 1, b: 2};" +
-        "b = 6;" +
-        "f = function (env) {" +
-        "  var a = 5;" +
-        "  with (env) {" +
-        "    env = {};" +
-        "    a = 10;" +
-        "    b = 20;" +
-        "  }" +
-        "  return [a, b];" +
-        "};" +
-        "[f(myenv), myenv];"
+      program = "
+        myenv = {a: 1, b: 2};
+        b = 6;
+        f = function (env) {
+          var a = 5;
+          with (env) {
+            env = {};
+            a = 10;
+            b = 20;
+          }
+          return [a, b];
+        };
+        [f(myenv), myenv];"
       expect(program).toEvaluateTo [[5, 6], {a: 10, b: 20}]
 
     it "can continue, break and return inside with blocks", ->
-      program =
-        "f = function () {" +
-        "  var a = -1;" +
-        "  e = {a: 0};" +
-        "  while (true) {" +
-        "    e.a++;" +
-        "    with (e) {" +
-        "      if (a == 1) continue;" +
-        "      if (a == 2) break;" +
-        "    }" +
-        "  }" +
-        "  with (e) return a;" +
-        "};" +
-        "f();"
+      program = "
+        f = function () {
+          var a = -1;
+          e = {a: 0};
+          while (true) {
+            e.a++;
+            with (e) {
+              if (a == 1) continue;
+              if (a == 2) break;
+            }
+          }
+          with (e) return a;
+        };
+        f();"
       expect(program).toEvaluateTo 2
 
     describe "handling errors", ->
       it "evaluates code in Try blocks", ->
-        program =
-          "a = 0;" +
-          "try {" +
-          "  a += 1;" +
-          "} catch (e) {" +
-          "  a += 2;" +
-          "}" +
-          "a;"
+        program = "
+          a = 0;
+          try {
+            a += 1;
+          } catch (e) {
+            a += 2;
+          }
+          a;"
         expect(program).toEvaluateTo 1
 
       it "evaluates code in Finally blocks", ->
-        program =
-          "a = 0;" +
-          "try {" +
-          "  a += 1;" +
-          "} finally {" +
-          "  a += 2;" +
-          "}" +
-          "a;"
+        program = "
+          a = 0;
+          try {
+            a += 1;
+          } finally {
+            a += 2;
+          }
+          a;"
         expect(program).toEvaluateTo 3
 
       it "can throw custom exceptions", ->
@@ -1304,280 +1306,280 @@ describe "The evaluator module", ->
         expect(callback).toHaveBeenCalledWith('hello', true)
 
       it "can throw exceptions from nested blocks", ->
-        program =
-          "function throwException() {throw 'my error';}" +
-          "if (true) {" +
-          "  with ({i: 0}) {" +
-          "    while (i === 0) {" +
-          "      switch (0) {" +
-          "      default:" +
-          "        throwException();" +
-          "      }" +
-          "      i++;" +
-          "    }" +
-          "  }" +
-          "}" +
-          "'foo';"
+        program = "
+          function throwException() {throw 'my error';}
+          if (true) {
+            with ({i: 0}) {
+              while (i === 0) {
+                switch (0) {
+                default:
+                  throwException();
+                }
+                i++;
+              }
+            }
+          }
+          'foo';"
         expect(program).toEvaluateTo 'my error', true
 
       it "can catch thrown exceptions", ->
-        program =
-          "a = 0;" +
-          "try {" +
-          "  throw 'my error';" +
-          "  a += 1;" +
-          "} catch (e) {" +
-          "  a += 2;" +
-          "}" +
-          "a;"
+        program = "
+          a = 0;
+          try {
+            throw 'my error';
+            a += 1;
+          } catch (e) {
+            a += 2;
+          }
+          a;"
         expect(program).toEvaluateTo 2
 
       it "can catch exceptions thrown from nested blocks", ->
-        program =
-          "a = 0;" +
-          "function throwException() {throw 'my error';}" +
-          "try {" +
-          "  if (true) {" +
-          "    with ({i: 0}) {" +
-          "      while (i === 0) {" +
-          "        switch (0) {" +
-          "        default:" +
-          "          throwException();" +
-          "        }" +
-          "        i++;" +
-          "      }" +
-          "    }" +
-          "  }" +
-          "  a += 1;" +
-          "} catch (e) {" +
-          "  a += 2;" +
-          "}" +
-          "a;"
+        program = "
+          a = 0;
+          function throwException() {throw 'my error';}
+          try {
+            if (true) {
+              with ({i: 0}) {
+                while (i === 0) {
+                  switch (0) {
+                  default:
+                    throwException();
+                  }
+                  i++;
+                }
+              }
+            }
+            a += 1;
+          } catch (e) {
+            a += 2;
+          }
+          a;"
         expect(program).toEvaluateTo 2
 
       it "has a reference to the error in catch blocks", ->
-        program =
-          "a = 0;" +
-          "try {" +
-          "  throw 2;" +
-          "  a += 1;" +
-          "} catch (e) {" +
-          "  a += e;" +
-          "}" +
-          "a;"
+        program = "
+          a = 0;
+          try {
+            throw 2;
+            a += 1;
+          } catch (e) {
+            a += e;
+          }
+          a;"
         expect(program).toEvaluateTo 2
 
       it "can throw from within a catch block", ->
-        program =
-          "count = 0;" +
-          "try {" +
-          "  throw 'my error';" +
-          "} catch (e) {" +
-          "  count++;" +
-          "  if (count < 2) {" +
-          "    throw 'error with count ' + count;" +
-          "  }" +
-          "}" +
-          "'foo';"
+        program = "
+          count = 0;
+          try {
+            throw 'my error';
+          } catch (e) {
+            count++;
+            if (count < 2) {
+              throw 'error with count ' + count;
+            }
+          }
+          'foo';"
         expect(program).toEvaluateTo 'error with count 1', true
 
       it "will run the finally block after catching an exception", ->
-        program =
-          "a = 0;" +
-          "try {" +
-          "  throw 'error';" +
-          "  a += 1;" +
-          "} catch (e) {" +
-          "  a += 2;" +
-          "} finally {" +
-          "  a += 4" +
-          "}" +
-          "a;"
+        program = "
+          a = 0;
+          try {
+            throw 'error';
+            a += 1;
+          } catch (e) {
+            a += 2;
+          } finally {
+            a += 4
+          }
+          a;"
         expect(program).toEvaluateTo 6
 
       it "will rethrow caught exceptions at the end of the finally if there is no catch block", ->
-        program =
-          "myObj = {val: 0};" +
-          "try {" +
-          "  throw myObj;" +
-          "  myObj.val += 1;" +
-          "} finally {" +
-          "  myObj.val += 2;" +
-          "}" +
-          "'foo';"
+        program = "
+          myObj = {val: 0};
+          try {
+            throw myObj;
+            myObj.val += 1;
+          } finally {
+            myObj.val += 2;
+          }
+          'foo';"
         expect(program).toEvaluateTo {val: 2}, true
 
       it "does not catch exceptions thrown in the finally block", ->
-        program =
-          "a = 0;" +
-          "try {" +
-          "} finally {" +
-          "  a++;" +
-          "  throw a;" +
-          "}" +
-          "'foo';"
+        program = "
+          a = 0;
+          try {
+          } finally {
+            a++;
+            throw a;
+          }
+          'foo';"
         expect(program).toEvaluateTo 1, true
 
       it "runs the finally block after the catch block throws an exception", ->
-        program =
-          "myObj = {val: 0};" +
-          "try {" +
-          "  throw myObj;" +
-          "  myObj.val += 1;" +
-          "} catch (e) {" +
-          "  throw myObj;" +
-          "  myObj.val += 2" +
-          "} finally {" +
-          "  myObj.val += 4;" +
-          "}" +
-          "'foo';"
+        program = "
+          myObj = {val: 0};
+          try {
+            throw myObj;
+            myObj.val += 1;
+          } catch (e) {
+            throw myObj;
+            myObj.val += 2
+          } finally {
+            myObj.val += 4;
+          }
+          'foo';"
         expect(program).toEvaluateTo {val: 4}, true
 
       it "bubbles up exceptions in the finally block", ->
-        program =
-          "try {" +
-          "  throw 'error in try';" +
-          "} catch (e) {" +
-          "  throw 'error in catch';" +
-          "} finally {" +
-          "  throw 'error in finally';" +
-          "}" +
-          "'foo';"
+        program = "
+          try {
+            throw 'error in try';
+          } catch (e) {
+            throw 'error in catch';
+          } finally {
+            throw 'error in finally';
+          }
+          'foo';"
         expect(program).toEvaluateTo 'error in finally', true
 
-        program =
-          "try {" +
-          "  throw 'error in try';" +
-          "} finally {" +
-          "  throw 'error in finally';" +
-          "}" +
-          "'foo';"
+        program = "
+          try {
+            throw 'error in try';
+          } finally {
+            throw 'error in finally';
+          }
+          'foo';"
         expect(program).toEvaluateTo 'error in finally', true
 
       it "can continue, break, and return from inside a try", ->
-        program =
-          "f = function () {" +
-          "  a = 0;" +
-          "  while (a < 3) {" +
-          "    try {" +
-          "      a++;" +
-          "      if (a === 1) {" +
-          "        continue;" +
-          "      } else if (a === 2) {" +
-          "        break;" +
-          "      }" +
-          "    } catch (e) {}" +
-          "  }" +
-          "  try {" +
-          "    return a" +
-          "  } catch (e) {}" +
-          "};" +
-          "f();"
+        program = "
+          f = function () {
+            a = 0;
+            while (a < 3) {
+              try {
+                a++;
+                if (a === 1) {
+                  continue;
+                } else if (a === 2) {
+                  break;
+                }
+              } catch (e) {}
+            }
+            try {
+              return a
+            } catch (e) {}
+          };
+          f();"
         expect(program).toEvaluateTo 2
 
       it "can continue, break, and return from inside a catch", ->
-        program =
-          "f = function () {" +
-          "  a = 0;" +
-          "  while (a < 3) {" +
-          "    try {" +
-          "      throw 'foo'" +
-          "    } catch (e) {" +
-          "      a++;" +
-          "      if (a === 1) {" +
-          "        continue;" +
-          "      } else if (a === 2) {" +
-          "        break;" +
-          "      }" +
-          "    }" +
-          "  }" +
-          "  try {" +
-          "    return a" +
-          "  } catch (e) {}" +
-          "};" +
-          "f();"
+        program = "
+          f = function () {
+            a = 0;
+            while (a < 3) {
+              try {
+                throw 'foo'
+              } catch (e) {
+                a++;
+                if (a === 1) {
+                  continue;
+                } else if (a === 2) {
+                  break;
+                }
+              }
+            }
+            try {
+              return a
+            } catch (e) {}
+          };
+          f();"
         expect(program).toEvaluateTo 2
 
       it "can continue, break, and return from inside a finally", ->
-        program =
-          "f = function () {" +
-          "  a = 0;" +
-          "  while (a < 3) {" +
-          "    try {" +
-          "    } finally {" +
-          "      a++;" +
-          "      if (a === 1) {" +
-          "        continue;" +
-          "      } else if (a === 2) {" +
-          "        break;" +
-          "      }" +
-          "    }" +
-          "  }" +
-          "  try {" +
-          "    return a" +
-          "  } catch (e) {}" +
-          "};" +
-          "f();"
+        program = "
+          f = function () {
+            a = 0;
+            while (a < 3) {
+              try {
+              } finally {
+                a++;
+                if (a === 1) {
+                  continue;
+                } else if (a === 2) {
+                  break;
+                }
+              }
+            }
+            try {
+              return a
+            } catch (e) {}
+          };
+          f();"
         expect(program).toEvaluateTo 2
 
-        program =
-          "f = function () {" +
-          "  a = 0;" +
-          "  while (a < 3) {" +
-          "    try {" +
-          "      throw 'my error';" +
-          "    } finally {" +
-          "      a++;" +
-          "      if (a === 1) {" +
-          "        continue;" +
-          "      } else if (a === 2) {" +
-          "        break;" +
-          "      }" +
-          "    }" +
-          "  }" +
-          "  try {" +
-          "    return a" +
-          "  } catch (e) {}" +
-          "};" +
-          "f();"
+        program = "
+          f = function () {
+            a = 0;
+            while (a < 3) {
+              try {
+                throw 'my error';
+              } finally {
+                a++;
+                if (a === 1) {
+                  continue;
+                } else if (a === 2) {
+                  break;
+                }
+              }
+            }
+            try {
+              return a
+            } catch (e) {}
+          };
+          f();"
         expect(program).toEvaluateTo 2
 
       it "can throw native exceptions", ->
-        program =
-          "delete foo;" +
-          "foo;"
+        program = "
+          delete foo;
+          foo;"
         expect(program).toEvaluateTo jasmine.any(evaluator.scope.ReferenceError), true
 
       it "can catch native exceptions", ->
-        program =
-          "delete foo;" +
-          "myerr = null;" +
-          "try {" +
-          "  foo;" +
-          "} catch (e) {" +
-          "  myerr = e;" +
-          "}" +
-          "myerr;"
+        program = "
+          delete foo;
+          myerr = null;
+          try {
+            foo;
+          } catch (e) {
+            myerr = e;
+          }
+          myerr;"
         expect(program).toEvaluateTo jasmine.any(evaluator.scope.ReferenceError)
 
       it "doesn't have a stack trace", ->
-        program =
-          "delete foo;" +
-          "myerr = null;" +
-          "try {" +
-          "  foo;" +
-          "} catch (e) {" +
-          "  myerr = e;" +
-          "}" +
-          "[myerr.name, myerr.message, myerr.stack];"
+        program = "
+          delete foo;
+          myerr = null;
+          try {
+            foo;
+          } catch (e) {
+            myerr = e;
+          }
+          [myerr.name, myerr.message, myerr.stack];"
         expect(program).toEvaluateTo ['ReferenceError', jasmine.any(String), null]
 
     it "can pause execution", ->
       evaluator.scope.pauseExecFunc = ->
         evaluator.pause()
-      program =
-        "pauseExecFunc();" +
-        "5;"
+      program = "
+        pauseExecFunc();
+        5;"
       callback = jasmine.createSpy()
       evaluator.eval program, callback
       expect(callback).not.toHaveBeenCalled()
@@ -1588,15 +1590,15 @@ describe "The evaluator module", ->
         context = evaluator.pause()
 
       evaluator.scope.myObject = myObject = val: 0
-      program =
-        "f = function () {" +
-        "  myObject.val = 1;" +
-        "  pauseExecFunc();" +
-        "  myObject.val = 2;" +
-        "};" +
-        "f();" +
-        "pauseExecFunc();" +
-        "myObject.val = 3;"
+      program = "
+        f = function () {
+          myObject.val = 1;
+          pauseExecFunc();
+          myObject.val = 2;
+        };
+        f();
+        pauseExecFunc();
+        myObject.val = 3;"
       evaluator.eval program
       expect(myObject.val).toEqual 1
 
@@ -1621,23 +1623,23 @@ describe "The evaluator module", ->
       evaluator.scope.obj1 = obj1 = val: 0
       evaluator.scope.obj2 = obj2 = val: 0
       program1 =
-        "f = function () {" +
-        "  obj1.val = 1;" +
-        "  pauseExecFunc();" +
-        "  obj1.val = 2;" +
-        "};" +
-        "f();" +
-        "pauseExecFunc();" +
-        "obj1.val = 3;"
+        "f = function () {
+          obj1.val = 1;
+          pauseExecFunc();
+          obj1.val = 2;
+        };
+        f();
+        pauseExecFunc();
+        obj1.val = 3;"
       program2 =
-        "f = function () {" +
-        "  obj2.val = 1;" +
-        "  pauseExecFunc();" +
-        "  obj2.val = 2;" +
-        "};" +
-        "f();" +
-        "pauseExecFunc();" +
-        "obj2.val = 3;"
+        "f = function () {
+          obj2.val = 1;
+          pauseExecFunc();
+          obj2.val = 2;
+        };
+        f();
+        pauseExecFunc();
+        obj2.val = 3;"
 
       evaluator.eval program1
       context1 = context
@@ -1670,9 +1672,9 @@ describe "The evaluator module", ->
       evaluator.scope.pauseExecFunc = ->
         context = evaluator.pause()
 
-      program =
-        "pauseExecFunc();" +
-        "'foobar';"
+      program = "
+        pauseExecFunc();
+        'foobar';"
       doneCallback = jasmine.createSpy()
 
       evaluator.eval program, doneCallback
@@ -1705,5 +1707,3 @@ describe "The evaluator module", ->
 # Todo: Object getter and setter literals
 # Todo: Use the field names the parser uses
 # Todo: Possibly use a better statement matching format?
-# Todo: Change 'program' so that it's a single large string rather than a bunch
-#   of strings for readability
