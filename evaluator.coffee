@@ -266,11 +266,23 @@ compileExpression = (expression, currentTemp) ->
       else
         # Access with dot notation, assuming property is an identifier
         compiled = "#{object}.#{property}"
-
-    # falls through
     when "CallExpression", "NewExpression"
-      Cls = (if expression.type is "CallExpression" then FunctionCall else NewObject)
-      callee = subExpression(expression.callee)
+      if expression.type is "CallExpression"
+        Cls = FunctionCall
+        if expression.callee.type is "MemberExpression"
+          thisValue = subExpression(expression.callee.object)
+          functionName = subExpression(expression.callee.property)
+          if expression.callee.property.type is "Identifier" and not expression.callee.computed
+            # This of the form a.b and we want to rewrite to be a["b"] so we
+            # need to wrap in quotes
+            functionName = "'#{functionName}'"
+        else
+          thisValue = null
+          functionName = subExpression(expression.callee)
+        callee = [thisValue, functionName]
+      else
+        Cls = NewObject
+        callee = subExpression(expression.callee)
       args = (subExpression(arg) for arg in expression.arguments)
       tempVar = getTempVariable()
       extraInstructions.push new Cls(callee, args, tempVar)
@@ -289,10 +301,7 @@ class ControlBlock
   canCatch: -> false
 
 class Closure
-  constructor: (func, env) ->
-    @function = func
-    @environment = env
-
+  constructor: (@function, @environment) ->
   getInstructions: ->
     @function.body.declaredFunctions.concat @function.body.instructions
 
@@ -312,29 +321,26 @@ class Closure
     return @environment.concat [newEnvironmentFrame]
 
 class FunctionDefinition
-  constructor: (name, params, body, tempVar) ->
-    @name = name
-    @params = params
-    @body = body
-    @tempVar = tempVar or null
-
+  constructor: (@name, @params, @body, @tempVar=null) ->
   updateState: (context) ->
     targetLocation = @tempVar or @name
     context.setValue targetLocation, new Closure(this, context.getEnvironment())
 
 class FunctionCall
-  constructor: (callee, args, tempVar) ->
-    @callee = callee
-    @args = args
-    @tempVar = tempVar
-
+  constructor: (@callee, @args, @tempVar) ->
   updateState: (context) ->
-    func = context.eval(@callee)
-    if func instanceof Closure
-      argValues = (context.eval(arg) for arg in @args)
-      context.pushState func.getInstructions(), this, func.getEnvironment(argValues)
+    if @callee[0] is null
+      functionLocation = @callee[1]
     else
-      context.eval @tempVar + " = " + @callee + "(" + @args.join(", ") + ")"
+      functionLocation = "#{@callee[0]}[#{@callee[1]}]"
+
+    func = context.eval functionLocation
+    if func instanceof Closure
+      thisObject = if @callee[0] is null then null else context.eval @callee[0]
+      argValues = (context.eval(arg) for arg in @args)
+      context.pushState func.getInstructions(), this, func.getEnvironment(argValues), thisObject
+    else
+      context.eval @tempVar + " = " + functionLocation + "(" + @args.join(", ") + ")"
 
   canReturn: -> true
   canCatch: -> false
@@ -343,14 +349,10 @@ class FunctionCall
     context.setValue @tempVar, value
 
 class NewObject
-  constructor: (callee, args, tempVar) ->
-    @callee = callee
-    @args = args
-    @tempVar = tempVar
+  constructor: (@callee, @args, @tempVar) ->
 
 class Return
-  constructor: (value) -> @value = value
-
+  constructor: (@value) ->
   updateState: (context) ->
     returnValue = context.eval(@value)
     # Find the next scope which can return
@@ -363,28 +365,21 @@ class Return
 
 
 class If extends ControlBlock
-  constructor: (condition, thenClause, elseClause) ->
-    @condition = condition
-    @thenCase = thenClause
-    @elseCase = elseClause
+  constructor: (@condition, @thenCase, @elseCase) ->
 
   updateState: (context) ->
     instructions = (if context.eval(@condition) then @thenCase else @elseCase)
     context.pushState instructions, this
 
 class With extends ControlBlock
-  constructor: (object, body) ->
-    @object = object
-    @body = body
+  constructor: (@object, @body) ->
   updateState: (context) ->
     environmentFrame = context.eval @object
     newEnvironment = context.getEnvironment().concat [environmentFrame]
     context.pushState @body, this, newEnvironment
 
 class Switch extends ControlBlock
-  constructor: (startPCVar, instructions) ->
-    @startPCVar = startPCVar
-    @instructions = instructions
+  constructor: (@startPCVar, @instructions) ->
   updateState: (context) ->
     startPC = context.eval @startPCVar
     # If startPC is null, there is no default and the discriminant did not
@@ -479,10 +474,8 @@ class Try extends ControlBlock
       context.pushState instructions, this
 
 class Loop extends ControlBlock
-  constructor: (instructions, initialPC) ->
-    @instructions = instructions
+  constructor: (@instructions, @initialPC=0) ->
     @instructions.push new Continue()
-    @initialPC = initialPC or 0
   updateState: (context) ->
     context.pushState @instructions, this
     context.setPC(@initialPC)
@@ -510,14 +503,22 @@ class Context
     @isDone = false
 
   eval: (command) ->
+    preWrap = ""
+    postWrap = ""
+
+    # Wrap in a function call to set 'this' object
+    thisObject = @getThisObject()
+    if thisObject isnt null
+      @scope["$__this__"] = thisObject
+      preWrap += "(function () {"
+      postWrap = "}).call($__this__)"
+
     # Wrap command in 'with' blocks for scoping
     environment = @getEnvironment()
     @scope["$__env__"] = environment
-    preWrap = ""
-    postWrap = ""
     for i in [0...environment.length]
       preWrap += "with($__env__[#{i}]){"
-      postWrap += "}"
+      postWrap = "}" + postWrap
 
     command = preWrap + command + postWrap
     try
@@ -533,12 +534,16 @@ class Context
       @isDone = true
       @onComplete?(value, isError)
 
-  pushState: (instructions, controlObject, environment) ->
+  pushState: (instructions,
+              controlObject=new ControlBlock(),
+              environment=@getEnvironment(),
+              thisObject=@getThisObject()) ->
     @stateStack.push
       instructions: instructions
       pc: 0
-      controlObject: controlObject or new ControlBlock()
-      environment: environment or @getEnvironment()
+      controlObject: controlObject
+      environment: environment
+      thisObject: thisObject
 
   popState: ->
     @stateStack.pop()
@@ -551,6 +556,7 @@ class Context
       pc: 0
       controlObject: null
       environment: []
+      thisObject: null
 
   stateHasMoreInstructions: ->
     currentState = @getCurrentState()
@@ -577,6 +583,9 @@ class Context
   setValue: (name, value) ->
     @scope["$__result__"] = value
     @eval name + " = $__result__"
+
+  getThisObject: ->
+    @getCurrentState().thisObject
 
 class Evaluator
   constructor: ->

@@ -69,12 +69,24 @@ describe "The evaluator module", ->
           message == null
 
         toBeFunctionCall: (callee, args, tempVar, isObjectCreation=false) ->
+          # If the function call is on a dictionary field (aka d.func()) the
+          # callee should be an array of two elements where the first element
+          # is the dictionary that will be the 'this' object, and the second
+          # argument is the field on that dictionary that contains the
+          # function. If the function call is not on a dictionary (eg func())
+          # the callee can be just the string of the object containing the
+          # function or an array of [null, <function>] where <function> is the
+          # string of the object containing the function.
+          unless Array.isArray(callee) or isObjectCreation
+            callee = [null, callee]
+
           targetClass = if isObjectCreation then Evaluator.NewObject else Evaluator.FunctionCall
           message = null
           unless @env.equals_ @actual, jasmine.any(targetClass)
             message = "Expected #{@actual} to be instance of #{targetClass}."
-          else unless @actual.callee == callee
-            message = "Calling function #{@actual.callee}, expected to be calling #{callee}."
+          else unless @env.equals_ @actual.callee, callee
+            message = "Expected to be calling #{jasmine.pp(callee)}, " +
+                      "actually calling #{jasmine.pp(@actual.callee)}."
           else unless @actual.tempVar == tempVar
             message = "Expected function call result to be stored in #{tempVar}, " +
                       "actually stored in #{@actual.tempVar}."
@@ -148,7 +160,12 @@ describe "The evaluator module", ->
 
         bytecode = getExpressionBytecode("a.b.c()")
         expect(bytecode.preInstructions.length).toEqual 1
-        expect(bytecode.preInstructions[0]).toBeFunctionCall "a.b.c", [], temp
+        expect(bytecode.preInstructions[0]).toBeFunctionCall ["a.b", "'c'"], [], temp
+        expect(bytecode.expression).toEqual temp
+
+        bytecode = getExpressionBytecode("arr[i]()")
+        expect(bytecode.preInstructions.length).toEqual 1
+        expect(bytecode.preInstructions[0]).toBeFunctionCall ["arr", "i"], [], temp
         expect(bytecode.expression).toEqual temp
 
         bytecode = getExpressionBytecode("func(foo, bar)")
@@ -174,8 +191,8 @@ describe "The evaluator module", ->
 
         bytecode = getExpressionBytecode("obj.baz(a).garply(b).length")
         expect(bytecode.preInstructions.length).toEqual 2
-        expect(bytecode.preInstructions[0]).toBeFunctionCall "obj.baz", ["a"], t0
-        expect(bytecode.preInstructions[1]).toBeFunctionCall "#{t0}.garply", ["b"], t1
+        expect(bytecode.preInstructions[0]).toBeFunctionCall ["obj", "'baz'"], ["a"], t0
+        expect(bytecode.preInstructions[1]).toBeFunctionCall [t0, "'garply'"], ["b"], t1
         expect(bytecode.expression).toEqual "#{t1}.length"
 
         bytecode = getExpressionBytecode("outer(inner())")
@@ -398,10 +415,9 @@ describe "The evaluator module", ->
         expect(bytecode.declaredVariables).toEqual ["a"]
         expect(bytecode.declaredFunctions.length).toEqual 1
         expect(bytecode.declaredFunctions[0]).toBeFunctionDef "b", [], "", null
-        expect(bytecode.instructions).toEqual [
-          new Evaluator.FunctionCall("getEnv", [], tempName(0)),
-          new Evaluator.With(tempName(0), ["a = 1"])
-        ]
+        expect(bytecode.instructions[0]).toBeFunctionCall "getEnv", [], tempName(0)
+        expect(bytecode.instructions[1]).toEqual jasmine.any(Evaluator.With)
+        expect(bytecode.instructions[1].body).toHaveSameAST ["a = 1"]
 
       describe "creating Switch blocks", ->
         it "desugars case evaluation and flattens all statements", ->
@@ -698,7 +714,7 @@ describe "The evaluator module", ->
           expect(ifStatement.thenCase[0]).toEqual jasmine.any(Evaluator.Break)
           expect(ifStatement.elseCase).toEqual []
 
-          expect(loopInstr.instructions[2]).toBeFunctionCall "a.push", ["i + 1"], t0
+          expect(loopInstr.instructions[2]).toBeFunctionCall ["a", "'push'"], ["i + 1"], t0
           expect(loopInstr.instructions[3]).toHaveSameAST t0
           expect(loopInstr.instructions[4]).toHaveSameAST "i++"
           expect(loopInstr.instructions[5]).toEqual jasmine.any(Evaluator.Continue)
@@ -843,7 +859,8 @@ describe "The evaluator module", ->
             actualErrStr = if didError then "" else "out"
             expFormatted = jasmine.pp(expected)
             resFormatted = jasmine.pp(result)
-            "Expected #{@actual} to evaluate to #{expFormatted} with#{expectErrStr} errors, " +
+            program = @actual.replace(/\s+/g, " ") # Collapse white spaces
+            "Expected #{program} to evaluate to #{expFormatted} with#{expectErrStr} errors, " +
             "actually evaluated to #{resFormatted} with#{actualErrStr} errors."
           evaluated and @env.equals_(result, expected) and didError == shouldBeError
 
@@ -1574,6 +1591,68 @@ describe "The evaluator module", ->
           [myerr.name, myerr.message, myerr.stack];"
         expect(program).toEvaluateTo ['ReferenceError', jasmine.any(String), null]
 
+    describe "the 'this' keyword", ->
+      it "has the proper value in user defined functions", ->
+        program = "
+          val = 0;
+          inc = function () {this.val++};
+          inc();
+          val;"
+        expect(program).toEvaluateTo 1
+
+        program = "
+          a = {
+            val: 0,
+            inc: function () {this.val++}
+          };
+          a.inc();
+          a.val;"
+        expect(program).toEvaluateTo 1
+
+        program = "
+          val = 0;
+          a = {
+            val: 0,
+            inc: function () {this.val++}
+          };
+          a.inc();
+          incCopy = a.inc;
+          incCopy();
+          incCopy();
+          [val, a.val];"
+        expect(program).toEvaluateTo [2, 1]
+
+      it "has the proper value in native functions", ->
+        inc = -> @val++
+        evaluator.scope.inc = inc
+        program = "
+          val = 0;
+          inc();
+          val;"
+        expect(program).toEvaluateTo 1
+
+        program = "
+          a = {
+            val: 0,
+            inc: inc
+          };
+          a.inc();
+          a.val;"
+        expect(program).toEvaluateTo 1
+
+        program = "
+          val = 0;
+          a = {
+            val: 0,
+            inc: inc
+          };
+          a.inc();
+          incCopy = a.inc;
+          incCopy();
+          incCopy();
+          [val, a.val];"
+        expect(program).toEvaluateTo [2, 1]
+
     it "can pause execution", ->
       evaluator.scope.pauseExecFunc = ->
         evaluator.pause()
@@ -1691,19 +1770,13 @@ describe "The evaluator module", ->
 # Todo: Handle everything defined on Function.prototype (eg call, apply, toString).
 # Todo: Don't allow eval or eval-like functionality
 # Todo: Make sure 'this' and 'arguments' work
+# Todo: Caller property on functions (eg arguments.callee.caller)
 # Todo: 'var' statements should evaluate to undefined
-# Todo: After resuming, errors need to bubble up
-# Todo: Errors should clear the execution state/stack
 # Todo: Allow user defined functions to be called by native functions
-# Todo: Test object creation
 # Todo: More scoping tests
 # Todo: Flush out documentation
-# Todo: Handle try, throw, catch
 # Todo: Handle For ... In loops
-# Todo: Handle object getters and setters
-# Todo: Skipping labels, not allowing labelled breaks/continues for now
-# Todo: Parentheses for order of operations:
-#   new (foo()) ();
 # Todo: Object getter and setter literals
+# Todo: Skipping labels, not allowing labelled breaks/continues for now
+# Todo: Parentheses for order of operations, eg new (foo()) ();
 # Todo: Use the field names the parser uses
-# Todo: Possibly use a better statement matching format?
