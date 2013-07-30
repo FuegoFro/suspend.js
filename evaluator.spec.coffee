@@ -1653,6 +1653,48 @@ describe "The evaluator module", ->
           [val, a.val];"
         expect(program).toEvaluateTo [2, 1]
 
+    describe "the 'arguments' variable", ->
+      describe "in user defined functions", ->
+        getArgs = null
+        beforeEach ->
+          evaluator.eval "getArgs = function () {return arguments;};"
+          getArgs = evaluator.scope.getArgs
+          expect(getArgs).not.toBeNull()
+
+        it "acts as an array of the arguments passed in", ->
+          expect("getArgs(1, 'hi', {}, false);").toEvaluateTo [1, 'hi', {}, false]
+
+        it "defines the arguments even if there is a variable of the same name", ->
+          program = "
+            f = function () {
+              var arguments;
+              return arguments;
+            };
+            f(1, 2, 3); "
+          expect(program).toEvaluateTo [1, 2, 3]
+
+        it "has the correct length field", ->
+          expect("getArgs(1, 2).length").toEvaluateTo 2
+          expect("getArgs(1, 2, [], true).length").toEvaluateTo 4
+
+        it "stores a reference to the function being called", ->
+          expect("getArgs().callee").toEvaluateTo getArgs
+
+      describe "in native functions", ->
+        getArgs = -> arguments
+        beforeEach ->
+          evaluator.scope.getArgs = getArgs
+
+        it "acts as an array of the arguments passed in", ->
+          expect("getArgs(1, 'hi', {}, false);").toEvaluateTo [1, 'hi', {}, false]
+
+        it "has the correct length field", ->
+          expect("getArgs(1, 2).length").toEvaluateTo 2
+          expect("getArgs(1, 2, [], true).length").toEvaluateTo 4
+
+        it "stores a reference to the function being called", ->
+          expect("getArgs().callee").toEvaluateTo getArgs
+
     it "can pause execution", ->
       evaluator.scope.pauseExecFunc = ->
         evaluator.pause()
@@ -1769,7 +1811,6 @@ describe "The evaluator module", ->
 #   then wait for it to be done and re-start evaluation.
 # Todo: Handle everything defined on Function.prototype (eg call, apply, toString).
 # Todo: Don't allow eval or eval-like functionality
-# Todo: Make sure 'this' and 'arguments' work
 # Todo: Caller property on functions (eg arguments.callee.caller)
 # Todo: 'var' statements should evaluate to undefined
 # Todo: Allow user defined functions to be called by native functions

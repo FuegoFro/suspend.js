@@ -313,6 +313,10 @@ class Closure
       newEnvironmentFrame[func.name] = undefined
     for param, i in @function.params
       newEnvironmentFrame[param] = args[i]
+    Object.defineProperty args, 'callee',
+      value: this
+      enumerable: false
+    newEnvironmentFrame.arguments = args
     if @function.tempVar isnt null and @function.name isnt null
       # this is not a declared function but it has a name, need to define
       # the name of the function to be the function itself
