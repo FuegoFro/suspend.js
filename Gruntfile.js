@@ -7,7 +7,7 @@ module.exports = function (grunt) {
 
     jasmine: {
       dist: {
-        src: 'dist/evaluator.compiled.js',
+        src: 'dist/evaluator.js',
         options: {
           specs: 'dist/evaluator.spec.js',
           vendor: [
@@ -20,7 +20,7 @@ module.exports = function (grunt) {
     coffee: {
       compile: {
         files: {
-          'dist/evaluator.compiled.js': 'evaluator.coffee',
+          'dist/evaluator.js': 'evaluator.coffee',
           'dist/evaluator.spec.js': 'evaluator.spec.coffee'
         }
       }
