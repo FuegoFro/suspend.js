@@ -4,16 +4,16 @@ describe "The evaluator module", ->
     evaluator = new Evaluator()
 
   afterEach ->
-    iframe = evaluator.scope.frameElement
+    iframe = evaluator.getGlobal("frameElement")
     iframe.parentElement.removeChild iframe
 
   it "creates an iframe to evaluate code in", ->
-    iframe = evaluator.scope.frameElement
+    iframe = evaluator.getGlobal("frameElement")
     
     # Need to test against both the global iframe and the iframe's iframe as
     # a workaround for PhantomJS. Really, we just care that it's an iframe.
     isIFrame = iframe instanceof HTMLIFrameElement or
-               iframe instanceof evaluator.scope.HTMLIFrameElement
+               iframe instanceof evaluator.getGlobal("HTMLIFrameElement")
     expect(isIFrame).toBe true
     expect(iframe.height).toEqual "0"
     expect(iframe.width).toEqual "0"
@@ -854,11 +854,11 @@ describe "The evaluator module", ->
           @message = =>
             expectErrStr = if shouldBeError then "" else "out"
             actualErrStr = if didError then "" else "out"
-            if expected instanceof Error or expected instanceof evaluator.scope.Error
+            if expected instanceof Error or expected instanceof evaluator.getGlobal("Error")
               expFormatted = expected.toString()
             else
               expFormatted = jasmine.pp(expected)
-            if result instanceof Error or result instanceof evaluator.scope.Error
+            if result instanceof Error or result instanceof evaluator.getGlobal("Error")
               resFormatted = result.toString()
             else
               resFormatted = jasmine.pp(result)
@@ -875,8 +875,8 @@ describe "The evaluator module", ->
         0: "zero value"
         9: "num value"
 
-      evaluator.scope.num = num
-      evaluator.scope.testId = testId
+      evaluator.setGlobal "num", num
+      evaluator.setGlobal "testId", testId
       
       # each line may rely on the previous line
       expressions = [
@@ -1019,7 +1019,7 @@ describe "The evaluator module", ->
 
     it "will call native functions", ->
       myNativeFunc = jasmine.createSpy().andReturn(12)
-      evaluator.scope.myNativeFunc = myNativeFunc
+      evaluator.setGlobal "myNativeFunc", myNativeFunc
       expect("myNativeFunc('hi', false)").toEvaluateTo 12
       expect(myNativeFunc).toHaveBeenCalledWith "hi", false
 
@@ -1585,9 +1585,9 @@ describe "The evaluator module", ->
         program = "
           delete foo;
           foo;"
-        expect(program).toEvaluateTo jasmine.any(evaluator.scope.ReferenceError), true
+        expect(program).toEvaluateTo jasmine.any(evaluator.getGlobal("ReferenceError")), true
 
-        evaluator.scope.throwError = -> throw myerr
+        evaluator.setGlobal "throwError", -> throw myerr
         for err in ["my error", {message: "my message"}, 5, true]
           myerr = err
           expect("throwError();").toEvaluateTo myerr, true
@@ -1602,7 +1602,7 @@ describe "The evaluator module", ->
             myerr = e;
           }
           myerr;"
-        expect(program).toEvaluateTo jasmine.any(evaluator.scope.ReferenceError)
+        expect(program).toEvaluateTo jasmine.any(evaluator.getGlobal("ReferenceError"))
 
       it "doesn't have a stack trace", ->
         program = "
@@ -1616,7 +1616,7 @@ describe "The evaluator module", ->
           [myerr.name, myerr.message, myerr.stack];"
         expect(program).toEvaluateTo ['ReferenceError', jasmine.any(String), null]
 
-        evaluator.scope.throwReferenceError = -> foo
+        evaluator.setGlobal "throwReferenceError", -> foo
         program = "
           delete foo;
           try {
@@ -1660,7 +1660,7 @@ describe "The evaluator module", ->
 
       it "has the proper value in native functions", ->
         inc = -> @val++
-        evaluator.scope.inc = inc
+        evaluator.setGlobal "inc", inc
         program = "
           val = 0;
           inc();
@@ -1694,7 +1694,7 @@ describe "The evaluator module", ->
         getArgs = null
         beforeEach ->
           evaluator.eval "getArgs = function () {return arguments;};"
-          getArgs = evaluator.scope.getArgs
+          getArgs = evaluator.getGlobal("getArgs")
           expect(getArgs).not.toBeNull()
 
         it "acts as an array of the arguments passed in", ->
@@ -1719,7 +1719,7 @@ describe "The evaluator module", ->
       describe "in native functions", ->
         getArgs = -> arguments
         beforeEach ->
-          evaluator.scope.getArgs = getArgs
+          evaluator.setGlobal "getArgs", getArgs
 
         it "acts as an array of the arguments passed in", ->
           expect("getArgs(1, 'hi', {}, false);").toEvaluateTo [1, 'hi', {}, false]
@@ -1807,7 +1807,7 @@ describe "The evaluator module", ->
 
       describe "from native functions", ->
         it "calls the native function", ->
-          evaluator.scope.Cls = (arg) ->
+          evaluator.setGlobal "Cls", (arg) ->
             @foo = 'hi'
             @bar = 'there'
             @myarg = arg
@@ -1817,7 +1817,7 @@ describe "The evaluator module", ->
           expect(program).toEvaluateTo ["hi", "there", 5]
 
         it "handles constructors that return a value", ->
-          evaluator.scope.Cls = ->
+          evaluator.setGlobal "Cls", ->
             @foo = "bar"
             return 5
           program = "
@@ -1827,13 +1827,13 @@ describe "The evaluator module", ->
 
         it "bubbles up exceptions thrown in the constructor", ->
           myError = "my error"
-          evaluator.scope.Cls = -> throw myError
+          evaluator.setGlobal "Cls", -> throw myError
           program = "
             new Cls(); "
           expect(program).toEvaluateTo myError, true
 
         it "sets the prototype properly", ->
-          evaluator.scope.Cls = ->
+          evaluator.setGlobal "Cls", ->
           program = "
             Cls.prototype.foo = 'hi';
             Cls.prototype.bar = 'there';
@@ -1852,7 +1852,7 @@ describe "The evaluator module", ->
 
       beforeEach ->
         returnValue = null
-        evaluator.scope.pauseExecFunc = ->
+        evaluator.setGlobal "pauseExecFunc", ->
           context = evaluator.pause()
           returnValue
         callback = jasmine.createSpy()
@@ -1866,7 +1866,7 @@ describe "The evaluator module", ->
         expect(callback).not.toHaveBeenCalled()
 
       it "requires a context to resume execution", ->
-        evaluator.scope.myObject = myObject = val: 0
+        evaluator.setGlobal "myObject", myObject = val: 0
         program = "
           f = function () {
             myObject.val = 1;
@@ -1893,8 +1893,8 @@ describe "The evaluator module", ->
         expect(myObject.val).toEqual 3
 
       it "can resume into different contexts", ->
-        evaluator.scope.obj1 = obj1 = val: 0
-        evaluator.scope.obj2 = obj2 = val: 0
+        evaluator.setGlobal "obj1", obj1 = val: 0
+        evaluator.setGlobal "obj2", obj2 = val: 0
         program1 =
           "f = function () {
             obj1.val = 1;

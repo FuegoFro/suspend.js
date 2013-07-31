@@ -747,6 +747,12 @@ class Evaluator
     document.body.appendChild(iframe)
     @scope = iframe.contentWindow
 
+  setGlobal: (name, value) ->
+    @scope[name] = value
+
+  getGlobal: (name) ->
+    @scope[name]
+
   ###
   Takes in the string of the code to be evaluated and a callback that has two
   parameters. If the evaluation does not produce an error, the first argument
