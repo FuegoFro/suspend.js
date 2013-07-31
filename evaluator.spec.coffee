@@ -1972,6 +1972,6 @@ describe "The evaluator module", ->
 # Todo: Handle For ... In loops
 # Todo: Object getter and setter literals
 # Todo: Skipping labels, not allowing labelled breaks/continues for now
-# Todo: Parentheses for order of operations, eg new (foo()) ();
 # Todo: Use the field names the parser uses
 # Todo: Functions should implicitly return undefined
+# Todo: Make sure foo(throw err, expensiveOp()) doesn't run expensiveOp

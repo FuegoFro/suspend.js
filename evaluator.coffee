@@ -1,3 +1,24 @@
+###
+The purpose of this project is to be able to pause arbitrary Javascript
+interpretation during any function call and replace the result of that call
+with an arbitrary value. The problem we are solving is simulating a blocking
+paradigm without locking up the browser. For instance suppose a function
+getData needs to fetch JSON from a remote server and you want the interaction
+to look like:
+  data = getData();
+Normally the only way to do this is to have the ajax request performed in
+getData to be synchronous so that the getData call doesn't return until the
+data has been fetched. However, a synchronous request will lock up the browser,
+preventing the user from interacting with the page at all and creating a poor
+experience. One solution is to have an interpreter that can pause execution at
+any time and pick up execution from that same point later. That way getData
+could pause interpretation, make an asynchronous request, and allow the
+function to return, freeing up the Javascript thread. When the data gets back
+from the server, execution can be resumed and the recieved data can be dropped
+in as the result of the most recent function call. In this way, we allow the
+execution of 'blocking' code without blocking the browser.
+###
+
 #*
 #* The evaluation takes place in 2 main steps:
 #*   = Walk the ast, convert into 'bytecode'
@@ -24,14 +45,35 @@
 #*
 #*
 
+###
+This takes in an array of statement nodes produced by Esprima. These get
+compiled to a series of bytecode instructions that are in a format that is
+easier to interpret. These instructions are either strings, which are safe
+to be 'eval'ed directly, or instances of special classes defined below
+which indicated changes in control flow or environment. More detail on how
+these classes are used can be found in description above the ControlBlock class.
+
+This function returns an object with three keys:
+  instructions: An array of compiled bytecode statements, as described above.
+  declaredVariables: A unique array (no duplicates) of strings that are the
+    variables that were declared with 'var' in this scope (including
+    sub-blocks, such as a nested 'if').
+  declaredFunctions: An array of FunctionDefinition objects that correspond
+    to functions declared in this scope (eg 'function foo() {}').
+###
 compileStatements = (statements) ->
   subExpression = (toCompile, currentTemp) ->
+    # Compiles an expression, merging the resulting preInstructions into the
+    # current list of instructions, returning the string of the expression.
     return null if toCompile is null
     compiled = compileExpression(toCompile, currentTemp)
     merge instructions, compiled.preInstructions
     compiled.expression
 
   subStatements = (toCompile) ->
+    # Compiles a statement or array of statements, merging the declared
+    # variables and functions into the current sets of declared variables and
+    # functions, returning the array of compiled instructions.
     return [] if toCompile is null
     toCompile = [toCompile]  unless Array.isArray(toCompile)
     bytecode = compileStatements(toCompile)
@@ -42,6 +84,8 @@ compileStatements = (statements) ->
     bytecode.instructions
 
   makeLoopTest = (test) ->
+    # Creates an array of instructions that will execute a 'break' if the
+    # expression given in the test argument evaluates to false.
     testBytecode = compileExpression(test)
     instructions = testBytecode.preInstructions
 
@@ -94,11 +138,23 @@ compileStatements = (statements) ->
         body = subStatements(statement.body)
         instructions.push new With(object, body)
       when "SwitchStatement"
-        # Emulate temporary variable system used in expression compilation
+        # Emulate temporary variable system used in expression compilation.
+        # This breaks the encapsulation a bit but until something else in
+        # compileStatements needs to use temporary variables this is probably
+        # the cleanest solution.
         startPCTemp = "$__temp__[0]"
         currentTemp = val: 1
         value = subExpression(statement.discriminant, currentTemp)
         subInstructions = []
+
+        # First unroll/preprocess the cases to be in a more useful format.
+        # This gives us two useful lists. First a single list of instructions
+        # that make up the body of the switch (imagine just removing all 'case'
+        # and 'default' labels). Second a mapping between uncompiled test
+        # expressions and corresponding starting program counter (the index
+        # into the switch body instructions that a given case corresponds to).
+        # This also extracts a starting program counter (index into the switch
+        # body) for the default case, if one exists.
         caseMappings = []
         defaultIndex = null
         for switchCase in statement.cases
@@ -110,8 +166,18 @@ compileStatements = (statements) ->
             defaultIndex = subInstructions.length
           merge subInstructions, subStatements(switchCase.consequent)
 
+        # The next step is to make an if/else-if chain that one at a time
+        # compares the determinant of the switch is equal to the value of the
+        # case statement (in the order that the case statements were written)
+        # and if so sets a temporary variable to the starting program counter
+        # (again, the index into the switch body instructions) that the matched
+        # case corresponds to. If none of the values match the discriminant,
+        # the default index is used. This recursive helper function makes this
+        # if/else-if chain out of if/else blocks.
         makeSwitchCaseIndexChooser = (reverseMappings) ->
-          # Returns an array of statements which are effectively an if/else if chain
+          # Returns an array of statements which are effectively an if/else-if
+          # chain. Mappings are in reverse order purely so that I can use 'pop'
+          # to get the next mapping.
           if reverseMappings.length == 0
             return ["#{startPCTemp} = #{defaultIndex}"]
 
@@ -126,9 +192,10 @@ compileStatements = (statements) ->
           caseIndexChooseInstructions.push new If(predicate, thenCase, elseCase)
           return caseIndexChooseInstructions
 
-        # Put if/else if's before the switch statement to choose which index to start at
+        # Put the if/else-if's before the switch statement.
         merge instructions, makeSwitchCaseIndexChooser(caseMappings.reverse())
-        # Create the actual switch statement
+        # Create the actual switch statement, letting it know where to look to
+        # find the starting index.
         instructions.push new Switch(startPCTemp, subInstructions)
       when "TryStatement"
         tryBlock = subStatements statement.block
@@ -184,13 +251,38 @@ compileStatements = (statements) ->
     declaredFunctions: declaredFunctions
   }
 
-compileExpression = (expression, currentTemp) ->
+###
+This function takes in an AST node representing a Javascript expression as
+output by Esprima.
+The second optional argument is used recursively by the function as a
+mechanisim to ensure that temporary variables used do not collide. This is
+only needed within expression not compilation (and not across different
+statements) is because we only make assumptions about the existence of
+temporary variables within a single statement. After that the temporary
+variables are not needed and it is okay for the next statement to overwrite
+them. This should not be used by other functions (except for one special
+case when compiling 'switch' blocks).
+
+It returns an object with two keys:
+  preInstructions: An array of any statements/instructions that will need
+    to be executed before this expression. This allows us to do things
+    like pull out function calls to be their own statements. For more on
+    the format of these statements, see the description of compileStatements.
+  expression: A string that can be 'eval'ed to get the value of the
+    expression after any instructions in preInstructions have been run.
+###
+compileExpression = (expression, currentTemp=val: 0) ->
+
   subExpression = (toCompile) ->
+    # Compiles an expression, merging the preInstructions from that compiliation
+    # into the current list of preInstructions.
     compiled = compileExpression(toCompile, currentTemp)
     merge extraInstructions, compiled.preInstructions
     compiled.expression
 
   statementsFromExpression = (toCompile, destination) ->
+    # Returns an array of statements that when run will put the value of the
+    # expression in the destination location.
     bytecode = compileExpression(toCompile)
     return bytecode.preInstructions.concat ["#{destination} = #{bytecode.expression}"]
 
@@ -198,8 +290,8 @@ compileExpression = (expression, currentTemp) ->
     # Need currentTemp to be a reference to an object so that
     # incrementing it's value will affect parent/child calls
     "$__temp__[#{currentTemp.val++}]"
+
   extraInstructions = []
-  currentTemp = currentTemp or val: 0
   switch expression.type
     when "ThisExpression"
       compiled = "this"
@@ -269,6 +361,8 @@ compileExpression = (expression, currentTemp) ->
     when "CallExpression", "NewExpression"
       if expression.type is "CallExpression"
         Cls = FunctionCall
+        # See the description on the FunctionCall constructor for an explanation
+        # of the callee value.
         if expression.callee.type is "MemberExpression"
           thisValue = subExpression(expression.callee.object)
           functionName = subExpression(expression.callee.property)
@@ -292,6 +386,19 @@ compileExpression = (expression, currentTemp) ->
     expression: compiled
   }
 
+###
+Control Objects
+These classes each have an updateState method that, given a Context object,
+will perform any actions and state changes necessary to carry out its job.
+
+Control Blocks
+These are the classes that can be provided as a controlObject for a state (see
+Context) and are a subset of control objects. They should implement the set of
+predicates found on ControlBlock unless it is ensured that a certain action will
+never reach a given control block (a function call should never have a bare
+break or continue in it). Returning true for canReturn or canCatch implies that
+the control object has a handleReturn or handleError function respectively.
+###
 
 class ControlBlock
   updateState: ->
@@ -334,6 +441,16 @@ class FunctionDefinition
     context.setValue targetLocation, closure
 
 class FunctionCall
+  # Callee is an array of length two. The first element is a string that points
+  # to the 'this' parameter (the dictionary that the function is stored on) and
+  # the second element is a string that contains the value of the property with
+  # the function. If the first element is null, it is assumed that the second
+  # parameter is the fully qualified path to the function. Below are three
+  # examples mapping function calls to this array format:
+  #
+  # a.b()  -> ["a",  "'b'"]
+  # a[b]() -> ["a",  "b"  ]
+  # f()    -> [null, "f"  ]
   constructor: (@callee, @args, @tempVar) ->
   updateState: (context) ->
     if @callee[0] is null
@@ -356,6 +473,8 @@ class FunctionCall
     context.setValue @tempVar, value
 
 class NewObject
+  # Unlike in the FunctionCall class, callee is just a string that points to
+  # location of the function that is the class for the object.
   constructor: (@callee, @args, @tempVar) ->
   updateState: (context) ->
     func = context.eval @callee
@@ -503,19 +622,27 @@ class Loop extends ControlBlock
   canBreak: -> true
 
 ###
-Context class, contains the execution context and wrappers to interact
-with the various elements of the execution context. An execution context
-is comprised of a series of states, accessed in a first-in-last-out order,
-or in other words, a stack of states. Each state consists of a list of
-instructions, a program counter (pc) which is the index of the next
-instruction, a control object, which is the control structure that is
-responsible for the current block of instructions, and an environment,
-which is an array of dictionaries that represent the lookup chain for
-variables in the state.
+The Context class contains the execution context and wrappers to interact with
+the various elements of the execution context. The 'scope' argument in the
+constructor should be an instance of a window object, which has an eval
+function that can be used to evaluate code in a sandboxed fashion. The
+onComplete argument should be a callback as given to Evaluator::eval
 
-The 'scope' argument in the constructor should be an instance of a window
-object, which has an eval function that can be used to evaluate code in a
-sandboxed fashion.
+An execution context is comprised of a stack (an array) of states, accessed in
+a first-in-last-out order. A state is an object with five keys:
+  instructions: An array of compiled instructions. Each instruction is either a
+    string which can be 'eval'ed or an instance of one of the control classes
+    above. See the description just above the ControlBlock class for more details.
+  pc: An index into the instructions array, indicating which instruction will be
+    run next.
+  controlObject: An instance of one of the control classes above. These are used
+    to figure out how to perform control flow operations that may span multiple
+    scopes, such as a return or continue. See the description just above the
+    ControlBlock class for more details.
+  environment: An array of objects (mappings) that represents the lookup chain
+    for variables in the state. The first mapping in the array will be the last
+    one checked when looking up a variable name.
+  thisObject: An aribrary object that is the current 'this' binding.
 ###
 class Context
   constructor: (@scope, @onComplete) ->
