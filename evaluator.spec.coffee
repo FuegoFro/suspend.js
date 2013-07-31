@@ -19,9 +19,6 @@ describe "The evaluator module", ->
     expect(iframe.width).toEqual "0"
     expect(iframe.style.visibility).toEqual "hidden"
 
-  it "creates a temporary variable array in the global scope", ->
-    expect(evaluator.scope["$__temp__"]).toEqual []
-
   describe "when compiling", ->
     beforeEach ->
       @addMatchers
@@ -1851,9 +1848,16 @@ describe "The evaluator module", ->
           expect(program).toEvaluateTo [["hi", "there", "hi", "there"], [1, 2, 3, 4]]
 
     describe "pausing execution", ->
-      it "won't call onComplete before execution finishes", ->
+      context = returnValue = callback = null
+
+      beforeEach ->
+        returnValue = null
         evaluator.scope.pauseExecFunc = ->
-          evaluator.pause()
+          context = evaluator.pause()
+          returnValue
+        callback = jasmine.createSpy()
+
+      it "won't call onComplete before execution finishes", ->
         program = "
           pauseExecFunc();
           5;"
@@ -1862,10 +1866,6 @@ describe "The evaluator module", ->
         expect(callback).not.toHaveBeenCalled()
 
       it "requires a context to resume execution", ->
-        context = null
-        evaluator.scope.pauseExecFunc = ->
-          context = evaluator.pause()
-
         evaluator.scope.myObject = myObject = val: 0
         program = "
           f = function () {
@@ -1893,10 +1893,6 @@ describe "The evaluator module", ->
         expect(myObject.val).toEqual 3
 
       it "can resume into different contexts", ->
-        context = null
-        evaluator.scope.pauseExecFunc = ->
-          context = evaluator.pause()
-
         evaluator.scope.obj1 = obj1 = val: 0
         evaluator.scope.obj2 = obj2 = val: 0
         program1 =
@@ -1945,23 +1941,70 @@ describe "The evaluator module", ->
         expect(obj2.val).toEqual 3
 
       it "calls the onComplete function even after pausing and resuming", ->
-        context = null
-        evaluator.scope.pauseExecFunc = ->
-          context = evaluator.pause()
-
         program = "
           pauseExecFunc();
           'foobar';"
-        doneCallback = jasmine.createSpy()
 
-        evaluator.eval program, doneCallback
-        expect(doneCallback).not.toHaveBeenCalled()
+        evaluator.eval program, callback
+        expect(callback).not.toHaveBeenCalled()
         evaluator.resume(context)
-        expect(doneCallback).toHaveBeenCalledWith "foobar", false
+        expect(callback).toHaveBeenCalledWith "foobar", false
 
-# Todo: If result is a promise (some other way to tell that it is our function?
-#   our function will tell the evaluator that the next thing is a promise?)
-#   then wait for it to be done and re-start evaluation.
+      it "handles returned values normally after a pause", ->
+        program = "
+          [
+            pauseExecFunc(),
+            pauseExecFunc(),
+            pauseExecFunc()
+          ]; "
+        returnValue = "first"
+        evaluator.eval program, callback
+        returnValue = "second"
+        evaluator.resume context
+        returnValue = "third"
+        evaluator.resume context
+        evaluator.resume context
+        expect(callback).toHaveBeenCalledWith ["first", "second", "third"], false
+
+      it "can set the value returned by a function call that just finished", ->
+        program = "
+          [
+            pauseExecFunc(),
+            pauseExecFunc(),
+            pauseExecFunc()
+          ]; "
+        evaluator.eval program, callback
+        evaluator.resume context, "first"
+        evaluator.resume context, "second"
+        evaluator.resume context, "third"
+        expect(callback).toHaveBeenCalledWith ["first", "second", "third"], false
+
+      it "prevents temporary variables in different contexts from colliding", ->
+        program = "
+          [
+            pauseExecFunc(),
+            pauseExecFunc(),
+            pauseExecFunc()
+          ]; "
+        callback1 = jasmine.createSpy("First Callback")
+        callback2 = jasmine.createSpy("Second Callback")
+
+        evaluator.eval program, callback1
+        context1 = context
+        evaluator.resume context1, "first"
+        evaluator.resume context1, "second"
+
+        evaluator.eval program, callback2
+        context2 = context
+
+        evaluator.resume context2, "first"
+        evaluator.resume context1, "third"
+        expect(callback1).toHaveBeenCalledWith ["first", "second", "third"], false
+        evaluator.resume context2, "second"
+        evaluator.resume context2, "third"
+        expect(callback2).toHaveBeenCalledWith ["first", "second", "third"], false
+
+
 # Todo: Handle everything defined on Function.prototype (eg call, apply, toString).
 # Todo: Don't allow eval or eval-like functionality
 # Todo: Caller property on functions (eg arguments.callee.caller)
@@ -1974,4 +2017,4 @@ describe "The evaluator module", ->
 # Todo: Skipping labels, not allowing labelled breaks/continues for now
 # Todo: Use the field names the parser uses
 # Todo: Functions should implicitly return undefined
-# Todo: Make sure foo(throw err, expensiveOp()) doesn't run expensiveOp
+# Todo: Objects returned by constructors should be used as the instance

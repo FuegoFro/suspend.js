@@ -703,7 +703,7 @@ class Context
       instructions: []
       pc: 0
       controlObject: null
-      environment: []
+      environment: [$__temp__: []]
       thisObject: null
 
   stateHasMoreInstructions: ->
@@ -715,6 +715,10 @@ class Context
     instruction = currentState.instructions[currentState.pc]
     currentState.pc++
     instruction
+
+  getPreviousInstruction: ->
+    currentState = @getCurrentState()
+    currentState.instructions[currentState.pc - 1]
 
   hasMoreStates: ->
     @stateStack.length isnt 0
@@ -742,8 +746,6 @@ class Evaluator
     iframe.style["visibility"] = "hidden"
     document.body.appendChild(iframe)
     @scope = iframe.contentWindow
-    @scope["$__temp__"] = []
-
 
   ###
   Takes in the string of the code to be evaluated and a callback that has two
@@ -761,9 +763,9 @@ class Evaluator
     instructions = bytecode.declaredFunctions.concat bytecode.instructions
     @context = new Context(@scope, onComplete)
     @context.pushState instructions
-    @execute()
+    @_execute()
 
-  execute: ->
+  _execute: ->
     lastResult = undefined
     while @context.hasMoreStates()
       while @context.stateHasMoreInstructions()
@@ -781,14 +783,18 @@ class Evaluator
     @isRunning = false
     @context
 
-  resume: (context) ->
+  resume: (context, returnValue) ->
     unless context
       throw new Error("Resuming evaluation requires a context as returned by pause.")
     else unless context instanceof Context
       throw new Error("Invalid context given to resume.")
+
+    if returnValue
+      lastInstruction = context.getPreviousInstruction()
+      lastInstruction.handleReturn(context, returnValue)
     @context = context
     @isRunning = true
-    @execute()
+    @_execute()
 
 Evaluator.compileStatements = compileStatements
 Evaluator.compileExpression = compileExpression
