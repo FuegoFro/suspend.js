@@ -407,8 +407,57 @@ class ControlBlock
   canReturn: -> false
   canCatch: -> false
 
+###
+This ia a control block that is used only in the native wrapper around Closures
+that allows user defiend functions to be called by native Javascript functions.
+###
+class NativeCall
+  canReturn: -> true
+  handleReturn: (context, value) ->
+    context.done(value)
+  canCatch: -> true
+  handleError: (context, error) ->
+    context.done(error, true)
+
 class Closure
-  constructor: (@function, @environment) ->
+  constructor: (@function, @environment, context) ->
+    # We create an actual Javascript function wrapper so that native Javascript
+    # functions can call user defined functions.
+
+    # Store local variables in the closure so we don't have to bind the wrapper
+    # function. We don't want to bind the function because we're going to want
+    # to pass the actual 'this' into the call.
+    closure = this
+    evaluator = context.evaluator
+    @wrapper = ->
+      # Store off any existing evaluation context
+      oldContext = evaluator.getContext()
+
+      # Manually create context and function call
+      returnValue = undefined
+      wasError = false
+      onComplete = (value, isError) ->
+        returnValue = value
+        wasError = isError
+      newContext = new Context(evaluator, context.scope, onComplete)
+      newContext.pushState(
+        closure.getInstructions(),
+        new NativeCall(),
+        closure.getEnvironment(arguments),
+        this
+      )
+      newContext.
+      evaluator.resume(newContext)
+
+      # Put old context back
+      evaluator.setContext(oldContext)
+
+      # Pass the value back to the calling function
+      if wasError
+        throw returnValue
+      else
+        return returnValue
+
   getInstructions: ->
     @function.body.declaredFunctions.concat @function.body.instructions
 
@@ -421,24 +470,35 @@ class Closure
     for param, i in @function.params
       newEnvironmentFrame[param] = args[i]
     Object.defineProperty args, 'callee',
-      value: this
+      value: @wrapper
       enumerable: false
     newEnvironmentFrame.arguments = args
     if @function.tempVar isnt null and @function.name isnt null
       # this is not a declared function but it has a name, need to define
       # the name of the function to be the function itself
-      newEnvironmentFrame[@function.name] = this
-
+      newEnvironmentFrame[@function.name] = @wrapper
     return @environment.concat [newEnvironmentFrame]
+
+  # Static functions and fields on the class
+  @closureFieldName = "$__closure__"
+  @isWrapper = (func) ->
+    typeof func is "function" and @toClosure(func) instanceof this
+  @toClosure = (func) ->
+    func[@closureFieldName]
+  @toWrapper = (closure) ->
+    # Put a reference to the closure on the wrapper function
+    closure.wrapper[@closureFieldName] = closure
+    closure.wrapper
 
 class FunctionDefinition
   constructor: (@name, @params, @body, @tempVar=null) ->
   updateState: (context) ->
     targetLocation = @tempVar or @name
-    closure = new Closure(this, context.getEnvironment())
-    closure.prototype = new context.scope.Object()
-    closure.prototype.constructor = closure
-    context.setValue targetLocation, closure
+    closure = new Closure(this, context.getEnvironment(), context)
+    wrapper = Closure.toWrapper(closure)
+    wrapper.prototype = new context.scope.Object()
+    wrapper::constructor = wrapper
+    context.setValue targetLocation, wrapper
 
 class FunctionCall
   # Callee is an array of length two. The first element is a string that points
@@ -459,10 +519,16 @@ class FunctionCall
       functionLocation = "#{@callee[0]}[#{@callee[1]}]"
 
     func = context.eval functionLocation
-    if func instanceof Closure
+    if Closure.isWrapper(func)
+      closure = Closure.toClosure(func)
       thisObject = if @callee[0] is null then null else context.eval @callee[0]
       argValues = (context.eval(arg) for arg in @args)
-      context.pushState func.getInstructions(), this, func.getEnvironment(argValues), thisObject
+      context.pushState(
+        closure.getInstructions(),
+        this,
+        closure.getEnvironment(argValues),
+        thisObject
+      )
     else
       context.eval "#{@tempVar} = #{functionLocation}(#{@args.join(", ")})"
 
@@ -478,11 +544,17 @@ class NewObject
   constructor: (@callee, @args, @tempVar) ->
   updateState: (context) ->
     func = context.eval @callee
-    if func instanceof Closure
+    if Closure.isWrapper(func)
+      closure = Closure.toClosure(func)
       instance = Object.create(func.prototype)
       context.setValue @tempVar, instance
       argValues = (context.eval(arg) for arg in @args)
-      context.pushState func.getInstructions(), this, func.getEnvironment(argValues), instance
+      context.pushState(
+        closure.getInstructions(),
+        this,
+        closure.getEnvironment(argValues),
+        instance
+      )
     else
       context.eval "#{@tempVar} = new #{@callee}(#{@args.join(", ")})"
 
@@ -645,7 +717,7 @@ a first-in-last-out order. A state is an object with five keys:
   thisObject: An aribrary object that is the current 'this' binding.
 ###
 class Context
-  constructor: (@scope, @onComplete) ->
+  constructor: (@evaluator, @scope, @onComplete) ->
     @stateStack = []
     @isDone = false
 
@@ -767,7 +839,7 @@ class Evaluator
     ast = esprima.parse(string).body
     bytecode = compileStatements(ast)
     instructions = bytecode.declaredFunctions.concat bytecode.instructions
-    @context = new Context(@scope, onComplete)
+    @context = new Context(this, @scope, onComplete)
     @context.pushState instructions
     @_execute()
 
@@ -801,6 +873,9 @@ class Evaluator
     @context = context
     @isRunning = true
     @_execute()
+
+  getContext: -> @context
+  setContext: (@context) ->
 
 Evaluator.compileStatements = compileStatements
 Evaluator.compileExpression = compileExpression

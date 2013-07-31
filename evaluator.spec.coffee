@@ -2004,12 +2004,62 @@ describe "The evaluator module", ->
         evaluator.resume context2, "third"
         expect(callback2).toHaveBeenCalledWith ["first", "second", "third"], false
 
+    describe "calling user functions from native functions", ->
+      it "works when there is no context", ->
+        evaluator.setGlobal "value", 0
+        userFunction = null
+        evaluator.eval "(function (incr) {value += incr});", (result) ->
+          userFunction = result
+        expect(userFunction).not.toBeNull()
+
+        userFunction(3)
+        expect(evaluator.getGlobal("value")).toEqual 3
+        userFunction(1)
+        expect(evaluator.getGlobal("value")).toEqual 4
+
+      it "returns values from user functions", ->
+        evaluator.setGlobal "value", 0
+        userFunction = null
+        evaluator.eval "(function (incr) {return value += incr});", (result) ->
+          userFunction = result
+        expect(userFunction).not.toBeNull()
+
+        expect(userFunction(3)).toEqual 3
+        expect(userFunction(1)).toEqual 4
+
+      it "does not interfere with existing execution contexts", ->
+        evaluator.setGlobal "arr", []
+        evaluator.setGlobal "callFunction", (func) ->
+          evaluator.getGlobal("arr").push "native before call"
+          func()
+          evaluator.getGlobal("arr").push "native after call"
+        program = "
+          f = function () {
+            arr.push('user in call');
+          };
+          arr.push('user before call');
+          callFunction(f);
+          arr.push('user after call');
+          arr;
+        "
+        expect(program).toEvaluateTo [
+          "user before call"
+          "native before call"
+          "user in call"
+          "native after call"
+          "user after call"
+        ]
+
+      it "bubbles up exceptions to native caller", ->
+        userFunction = null
+        evaluator.eval "(function () {throw 'my error'});", (result) ->
+          userFunction = result
+        expect(userFunction).toThrow('my error')
 
 # Todo: Handle everything defined on Function.prototype (eg call, apply, toString).
 # Todo: Don't allow eval or eval-like functionality
 # Todo: Caller property on functions (eg arguments.callee.caller)
 # Todo: 'var' statements should evaluate to undefined
-# Todo: Allow user defined functions to be called by native functions
 # Todo: More scoping tests
 # Todo: Flush out documentation
 # Todo: Handle For ... In loops
