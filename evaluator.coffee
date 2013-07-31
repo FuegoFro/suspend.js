@@ -367,6 +367,9 @@ class NewObject
     else
       context.eval "#{@tempVar} = new #{@callee}(#{@args.join(", ")})"
 
+  canCatch: -> false
+  canReturn: -> true
+  handleReturn: ->
 
 class Return
   constructor: (@value) ->
@@ -523,13 +526,6 @@ class Context
     preWrap = ""
     postWrap = ""
 
-    # Wrap in a function call to set 'this' object
-    thisObject = @getThisObject()
-    if thisObject isnt null
-      @scope["$__this__"] = thisObject
-      preWrap += "(function () {"
-      postWrap = "}).call($__this__)"
-
     # Wrap command in 'with' blocks for scoping
     environment = @getEnvironment()
     @scope["$__env__"] = environment
@@ -537,14 +533,22 @@ class Context
       preWrap += "with($__env__[#{i}]){"
       postWrap = "}" + postWrap
 
+    # Wrap in a function call to set 'this' object
+    thisObject = @getThisObject()
+    if thisObject isnt null
+      @scope["$__this__"] = thisObject
+      preWrap = "(function () {#{preWrap}return "
+      postWrap += "}).call($__this__)"
+
     command = preWrap + command + postWrap
     try
       @scope.eval command
     catch e
-      # Need to get rid of stack trace, but some browsers don't let you modify
-      # the .stack field of error objects, so we are wrapping this object.
-      newError = Object.create(e, stack: {value: null})
-      @pushState [new Throw(newError, true)]
+      if e instanceof @scope.Error or e instanceof Error
+        # Need to get rid of stack trace, but some browsers don't let you modify
+        # the .stack field of error objects, so we are wrapping this object.
+        e = Object.create(e, stack: {value: null})
+      @pushState [new Throw(e, true)]
 
   done: (value, isError) ->
     unless @isDone

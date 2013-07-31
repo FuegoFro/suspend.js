@@ -866,8 +866,8 @@ describe "The evaluator module", ->
             else
               resFormatted = jasmine.pp(result)
             program = @actual.replace(/\s+/g, " ") # Collapse white spaces
-            "Expected #{program} to evaluate to #{expFormatted} with#{expectErrStr} errors, " +
-            "actually evaluated to #{resFormatted} with#{actualErrStr} errors."
+            "Expected '#{program}' to evaluate to '#{expFormatted}' with#{expectErrStr} errors, " +
+            "actually evaluated to '#{resFormatted}' with#{actualErrStr} errors."
           evaluated and @env.equals_(result, expected) and didError == shouldBeError
 
     it "uses its context to evaluate non-function expressions", ->
@@ -1590,6 +1590,11 @@ describe "The evaluator module", ->
           foo;"
         expect(program).toEvaluateTo jasmine.any(evaluator.scope.ReferenceError), true
 
+        evaluator.scope.throwError = -> throw myerr
+        for err in ["my error", {message: "my message"}, 5, true]
+          myerr = err
+          expect("throwError();").toEvaluateTo myerr, true
+
       it "can catch native exceptions", ->
         program = "
           delete foo;
@@ -1608,6 +1613,17 @@ describe "The evaluator module", ->
           myerr = null;
           try {
             foo;
+          } catch (e) {
+            myerr = e;
+          }
+          [myerr.name, myerr.message, myerr.stack];"
+        expect(program).toEvaluateTo ['ReferenceError', jasmine.any(String), null]
+
+        evaluator.scope.throwReferenceError = -> foo
+        program = "
+          delete foo;
+          try {
+            throwReferenceError();
           } catch (e) {
             myerr = e;
           }
@@ -1718,6 +1734,34 @@ describe "The evaluator module", ->
         it "stores a reference to the function being called", ->
           expect("getArgs().callee").toEvaluateTo getArgs
 
+    it "works as expected inside method calls", ->
+      # There was a strange implementation bug where many things broke inside
+      # method calls (such as 'a.b()' as opposed to 'b()')
+      program = "
+        obj = {
+          val: 'my val',
+          getVal: function () {
+            return this.val;
+          },
+          f: function (num) {
+            a = [];
+            a.push(new Object());
+            if (num > 2) {
+              a.push('yes');
+            }
+            switch (num) {
+              case -1:
+                a.push('no');
+              default:
+                a.push('switch');
+            }
+            a.push(this.getVal());
+            throw a;
+          }
+        };
+        obj.f(3); "
+      expect(program).toEvaluateTo [{}, "yes", "switch", "my val"], true
+
     describe "creating instances", ->
       describe "from user defined functions", ->
         it "calls the constructor with the instance as 'this'", ->
@@ -1730,6 +1774,24 @@ describe "The evaluator module", ->
             instance = new Cls(5);
             [instance.foo, instance.bar, instance.myarg]; "
           expect(program).toEvaluateTo ["hi", "there", 5]
+
+        it "handles constructors that return a value", ->
+          program = "
+            function Cls() {
+              this.foo = 'bar';
+              return 5;
+            }
+            instance = new Cls();
+            instance.foo; "
+          expect(program).toEvaluateTo "bar"
+
+        it "bubbles up exceptions thrown in the constructor", ->
+          program = "
+            function Cls() {
+              throw 'my error';
+            }
+            new Cls(); "
+          expect(program).toEvaluateTo "my error", true
 
         it "sets the prototype properly", ->
           program = "
@@ -1756,6 +1818,22 @@ describe "The evaluator module", ->
             instance = new Cls(5);
             [instance.foo, instance.bar, instance.myarg]; "
           expect(program).toEvaluateTo ["hi", "there", 5]
+
+        it "handles constructors that return a value", ->
+          evaluator.scope.Cls = ->
+            @foo = "bar"
+            return 5
+          program = "
+            instance = new Cls();
+            instance.foo; "
+          expect(program).toEvaluateTo "bar"
+
+        it "bubbles up exceptions thrown in the constructor", ->
+          myError = "my error"
+          evaluator.scope.Cls = -> throw myError
+          program = "
+            new Cls(); "
+          expect(program).toEvaluateTo myError, true
 
         it "sets the prototype properly", ->
           evaluator.scope.Cls = ->
@@ -1881,7 +1959,6 @@ describe "The evaluator module", ->
         evaluator.resume(context)
         expect(doneCallback).toHaveBeenCalledWith "foobar", false
 
-# Todo: Handle creation of proper prototype chains on functions
 # Todo: If result is a promise (some other way to tell that it is our function?
 #   our function will tell the evaluator that the next thing is a promise?)
 #   then wait for it to be done and re-start evaluation.
