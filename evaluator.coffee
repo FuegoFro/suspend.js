@@ -106,7 +106,7 @@ compileStatements = (statements) ->
           name = subExpression(declarator.id)
           declaredVariables[name] = 1
           if declarator.init isnt null
-            instructions.push "#{name} = #{subExpression(declarator.init)}"
+            instructions.push "void (#{name} = #{subExpression(declarator.init)})"
 
       when "FunctionDeclaration"
         name = subExpression(statement.id)

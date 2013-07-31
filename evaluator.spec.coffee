@@ -310,7 +310,7 @@ describe "The evaluator module", ->
         bytecode = getStatementsBytecode(original)
         expect(bytecode.declaredVariables).toEqual ["a"]
         expect(bytecode.instructions.length).toEqual 4
-        expect(bytecode.instructions[0]).toHaveSameAST "a = 5"
+        expect(bytecode.instructions[0]).toHaveSameAST "void (a = 5)"
         expect(bytecode.instructions[1]).toBeFunctionCall "g", [], t0
         expect(bytecode.instructions[2]).toBeFunctionCall "f", ["a", t0], t1
         expect(bytecode.instructions[3]).toHaveSameAST "b = #{t1}"
@@ -318,7 +318,7 @@ describe "The evaluator module", ->
       it "extracts declared variables", ->
         expectStatementsEqual(
           "a = 1; var b = 2, c; var a; b++"
-          ["a = 1", "b = 2", "b++"]
+          ["a = 1", "void (b = 2)", "b++"]
           ["a", "b", "c"]
         )
 
@@ -338,7 +338,7 @@ describe "The evaluator module", ->
         expect(bytecode.instructions.length).toEqual 3
         expect(bytecode.instructions[0]).toHaveSameAST "obj = {msg: 'hi'}"
         expect(bytecode.instructions[1]).toBeFunctionDef "bar", [], "", tempName(0)
-        expect(bytecode.instructions[2]).toHaveSameAST "bar = #{tempName(0)}"
+        expect(bytecode.instructions[2]).toHaveSameAST "void (bar = #{tempName(0)})"
 
       it "can return values from functions", ->
         bytecode = getExpressionBytecode("(function () {return 5})")
@@ -350,7 +350,7 @@ describe "The evaluator module", ->
       it "flattens block statements", ->
         expectStatementsEqual(
           "a = 1; {b = 2; var b, c = 3; function foo() {}}; var c = 4;"
-          ["a = 1", "b = 2", "c = 3", "c = 4"]
+          ["a = 1", "b = 2", "void (c = 3)", "void (c = 4)"]
           ["b", "c"]
           [["foo", [], "", null]]
         )
@@ -373,14 +373,14 @@ describe "The evaluator module", ->
         expect(declaredFuncs[0]).toBeFunctionDef "inside", [], "", null
         expect(declaredFuncs[1]).toBeFunctionDef "isHi", ["val"], "return val === 'hi'", null
         expect(bytecode.instructions.length).toEqual 4
-        expect(bytecode.instructions[0]).toHaveSameAST "myval = 'hi'"
+        expect(bytecode.instructions[0]).toHaveSameAST "void (myval = 'hi')"
         expect(bytecode.instructions[1]).toBeFunctionCall "isHi", ["myval"], tempName(0)
         ifStatement = bytecode.instructions[2]
         expect(ifStatement).toEqual jasmine.any(Evaluator.If)
         expect(ifStatement.condition).toHaveSameAST "!#{tempName(0)}"
-        expect(ifStatement.thenCase).toHaveSameAST ["a = 1"]
-        expect(ifStatement.elseCase).toHaveSameAST ["b = 2"]
-        expect(bytecode.instructions[3]).toHaveSameAST "c = 'hello'"
+        expect(ifStatement.thenCase).toHaveSameAST ["void (a = 1)"]
+        expect(ifStatement.elseCase).toHaveSameAST ["void (b = 2)"]
+        expect(bytecode.instructions[3]).toHaveSameAST "void (c = 'hello')"
 
       it "handles if statements without else blocks", ->
         bytecode = getStatementsBytecode("
@@ -414,7 +414,7 @@ describe "The evaluator module", ->
         expect(bytecode.declaredFunctions[0]).toBeFunctionDef "b", [], "", null
         expect(bytecode.instructions[0]).toBeFunctionCall "getEnv", [], tempName(0)
         expect(bytecode.instructions[1]).toEqual jasmine.any(Evaluator.With)
-        expect(bytecode.instructions[1].body).toHaveSameAST ["a = 1"]
+        expect(bytecode.instructions[1].body).toHaveSameAST ["void (a = 1)"]
 
       describe "creating Switch blocks", ->
         it "desugars case evaluation and flattens all statements", ->
@@ -2056,12 +2056,19 @@ describe "The evaluator module", ->
           userFunction = result
         expect(userFunction).toThrow('my error')
 
+    it "returns undefined from var'ed assignments", ->
+      # Note that this test is techincally wrong. A more correct test would be
+      # that it doesn't update the last result from var'ed assignements, as
+      # follows:
+      # expect("a = 1; var a = 2;").toEvaluateTo 1
+      expect("var a = 1;").toEvaluateTo undefined
+
 # Todo: Handle everything defined on Function.prototype (eg call, apply, toString).
 # Todo: Don't allow eval or eval-like functionality
 # Todo: Caller property on functions (eg arguments.callee.caller)
-# Todo: 'var' statements should evaluate to undefined
+# Todo: '1; var a = 0' should evaluate to 1
 # Todo: More scoping tests
-# Todo: Flush out documentation
+# Todo: Flush out documentation on the Github repo
 # Todo: Handle For ... In loops
 # Todo: Object getter and setter literals
 # Todo: Skipping labels, not allowing labelled breaks/continues for now
