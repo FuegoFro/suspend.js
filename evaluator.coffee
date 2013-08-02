@@ -446,11 +446,11 @@ class Closure
         closure.getEnvironment(arguments),
         this
       )
-      newContext.
-      evaluator.resume(newContext)
+      evaluator.setContext newContext
+      evaluator._execute()
 
       # Put old context back
-      evaluator.setContext(oldContext)
+      evaluator.setContext oldContext
 
       # Pass the value back to the calling function
       if wasError
@@ -818,6 +818,7 @@ class Evaluator
     iframe.style["visibility"] = "hidden"
     document.body.appendChild(iframe)
     @scope = iframe.contentWindow
+    @context = null
 
   setGlobal: (name, value) ->
     @scope[name] = value
@@ -835,7 +836,6 @@ class Evaluator
   the second will be the boolean `true`.
   ###
   eval: (string, onComplete) ->
-    @isRunning = true
     ast = esprima.parse(string).body
     bytecode = compileStatements(ast)
     instructions = bytecode.declaredFunctions.concat bytecode.instructions
@@ -844,34 +844,42 @@ class Evaluator
     @_execute()
 
   _execute: ->
+    @isRunning = true
     lastResult = undefined
     while @context.hasMoreStates()
       while @context.stateHasMoreInstructions()
-        return unless @isRunning
         instruction = @context.getNextInstruction()
         if typeof instruction is "string"
           lastResult = @context.eval(instruction)
         else
           instruction.updateState @context
+        return unless @isRunning
       # Reached end of current set of instructions, pop up to previous set.
       @context.popState()
     @context.done(lastResult, false)
 
   pause: ->
     @isRunning = false
-    @context
+    [context, @context] = [@context, null]
+    context
 
-  resume: (context, returnValue) ->
+  resume: (context, value, isError=false) ->
+    if context is null
+      # If you pause when there is no context, it returns a null context, which
+      # should be valid to resume with.
+      return
     unless context
       throw new Error("Resuming evaluation requires a context as returned by pause.")
     else unless context instanceof Context
       throw new Error("Invalid context given to resume.")
 
-    if returnValue
+    if arguments.length > 1
       lastInstruction = context.getPreviousInstruction()
-      lastInstruction.handleReturn(context, returnValue)
+      if isError
+        context.pushState [new Throw(value, true)]
+      else
+        lastInstruction.handleReturn context, value
     @context = context
-    @isRunning = true
     @_execute()
 
   getContext: -> @context

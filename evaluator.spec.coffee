@@ -1971,13 +1971,41 @@ describe "The evaluator module", ->
           [
             pauseExecFunc(),
             pauseExecFunc(),
+            pauseExecFunc(),
+            pauseExecFunc(),
+            pauseExecFunc(),
+            pauseExecFunc(),
+            pauseExecFunc(),
+            pauseExecFunc(),
             pauseExecFunc()
           ]; "
         evaluator.eval program, callback
         evaluator.resume context, "first"
-        evaluator.resume context, "second"
-        evaluator.resume context, "third"
-        expect(callback).toHaveBeenCalledWith ["first", "second", "third"], false
+        evaluator.resume context, false
+        evaluator.resume context, true
+        evaluator.resume context, 0
+        evaluator.resume context, 1
+        evaluator.resume context, {foo: "bar"}
+        evaluator.resume context, [1, 2, 3]
+        evaluator.resume context, undefined
+        evaluator.resume context, null
+        expect(callback).toHaveBeenCalledWith [
+          "first",
+          false,
+          true,
+          0,
+          1,
+          {foo: "bar"},
+          [1, 2, 3],
+          undefined,
+          null
+        ], false
+
+      it "can throw an error thrown by a function call the just finished", ->
+        evaluator.eval "pauseExecFunc();", callback
+        error = new Error("This is an error")
+        evaluator.resume context, error, true
+        expect(callback).toHaveBeenCalledWith error, true
 
       it "prevents temporary variables in different contexts from colliding", ->
         program = "
@@ -2003,6 +2031,27 @@ describe "The evaluator module", ->
         evaluator.resume context2, "second"
         evaluator.resume context2, "third"
         expect(callback2).toHaveBeenCalledWith ["first", "second", "third"], false
+
+      it "can be paused multiple times and resumed multiple times in a row", ->
+        context1 = context2 = null
+        evaluator.setGlobal "pause", ->
+          context1 = evaluator.pause()
+          context2 = evaluator.pause()
+        evaluator.eval "pause(); 'foo';", callback
+        # Resume in a nested fashion
+        evaluator.resume(context2)
+        expect(callback).not.toHaveBeenCalled()
+        evaluator.resume(context1)
+        expect(callback).toHaveBeenCalledWith "foo", false
+
+      it "can pause and resume when there is nothing being executed", ->
+        # Should not throw any errors
+        evaluator.resume evaluator.pause()
+        evaluator.eval "'foo';", callback
+        expect(callback).toHaveBeenCalled()
+        callback.reset()
+        evaluator.resume evaluator.pause()
+        expect(callback).not.toHaveBeenCalled()
 
     describe "calling user functions from native functions", ->
       it "works when there is no context", ->
@@ -2054,7 +2103,23 @@ describe "The evaluator module", ->
         userFunction = null
         evaluator.eval "(function () {throw 'my error'});", (result) ->
           userFunction = result
-        expect(userFunction).toThrow('my error')
+        expect(userFunction).toThrow "my error"
+
+      it "won't restart paused execution", ->
+        context = null
+        evaluator.setGlobal "pause", -> context = evaluator.pause()
+        callback = jasmine.createSpy()
+        program = "
+          val = 0;
+          /* Make sure multiple instructions work */
+          f = function () {val++; val++; val++};
+          pause();
+          val; "
+        evaluator.eval program, callback
+        evaluator.getGlobal('f')()
+        expect(callback).not.toHaveBeenCalled()
+        evaluator.resume context
+        expect(callback).toHaveBeenCalledWith 3, false
 
     it "returns undefined from var'ed assignments", ->
       # Note that this test is techincally wrong. A more correct test would be
