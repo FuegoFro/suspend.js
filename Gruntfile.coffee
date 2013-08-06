@@ -3,9 +3,9 @@ module.exports = (grunt) ->
     pkg: grunt.file.readJSON 'package.json'
     jasmine:
       dist:
-        src: 'dist/evaluator.js'
+        src: 'dist/suspend.js'
         options:
-          specs: 'dist/evaluator.spec.js'
+          specs: 'dist/suspend.spec.js'
           vendor: [
             'lib/esprima/esprima.js'
           ]
@@ -13,8 +13,8 @@ module.exports = (grunt) ->
     coffee:
       compile:
         files:
-          'dist/evaluator.js': 'evaluator.coffee'
-          'dist/evaluator.spec.js': 'evaluator.spec.coffee'
+          'dist/suspend.js': 'suspend.coffee'
+          'dist/suspend.spec.js': 'suspend.spec.coffee'
 
     coffeelint:
       app:

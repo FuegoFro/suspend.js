@@ -510,7 +510,7 @@ This function returns an object with three keys:
       evaluator = context.evaluator;
       this.wrapper = function() {
         var newContext, oldContext, onComplete, returnValue, wasError;
-        oldContext = evaluator.getContext();
+        oldContext = evaluator._getContext();
         returnValue = void 0;
         wasError = false;
         onComplete = function(value, isError) {
@@ -519,9 +519,9 @@ This function returns an object with three keys:
         };
         newContext = new Context(evaluator, context.scope, onComplete);
         newContext.pushState(closure.getInstructions(), new NativeCall(), closure.getEnvironment(arguments), this);
-        evaluator.setContext(newContext);
+        evaluator._setContext(newContext);
         evaluator._execute();
-        evaluator.setContext(oldContext);
+        evaluator._setContext(oldContext);
         if (wasError) {
           throw returnValue;
         } else {
@@ -1172,11 +1172,11 @@ This function returns an object with three keys:
       return this._execute();
     };
 
-    Evaluator.prototype.getContext = function() {
+    Evaluator.prototype._getContext = function() {
       return this.context;
     };
 
-    Evaluator.prototype.setContext = function(context) {
+    Evaluator.prototype._setContext = function(context) {
       this.context = context;
     };
 
