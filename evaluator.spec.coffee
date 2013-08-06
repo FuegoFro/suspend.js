@@ -2133,7 +2133,6 @@ describe "The evaluator module", ->
 # Todo: Caller property on functions (eg arguments.callee.caller)
 # Todo: '1; var a = 0' should evaluate to 1
 # Todo: More scoping tests
-# Todo: Flush out documentation on the Github repo
 # Todo: Handle For ... In loops
 # Todo: Object getter and setter literals
 # Todo: Skipping labels, not allowing labelled breaks/continues for now

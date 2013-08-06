@@ -431,7 +431,7 @@ class Closure
     evaluator = context.evaluator
     @wrapper = ->
       # Store off any existing evaluation context
-      oldContext = evaluator.getContext()
+      oldContext = evaluator._getContext()
 
       # Manually create context and function call
       returnValue = undefined
@@ -446,11 +446,11 @@ class Closure
         closure.getEnvironment(arguments),
         this
       )
-      evaluator.setContext newContext
+      evaluator._setContext newContext
       evaluator._execute()
 
       # Put old context back
-      evaluator.setContext oldContext
+      evaluator._setContext oldContext
 
       # Pass the value back to the calling function
       if wasError
@@ -882,8 +882,8 @@ class Evaluator
     @context = context
     @_execute()
 
-  getContext: -> @context
-  setContext: (@context) ->
+  _getContext: -> @context
+  _setContext: (@context) ->
 
 Evaluator.compileStatements = compileStatements
 Evaluator.compileExpression = compileExpression
