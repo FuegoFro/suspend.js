@@ -741,6 +741,8 @@ class Context
 
     command = preWrap + command + postWrap
     try
+      if not @scope.eval and @scope.execScript
+        @scope.execScript("null")
       @scope.eval command
     catch e
       if e instanceof @scope.Error or e instanceof Error
