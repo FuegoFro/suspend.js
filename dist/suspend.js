@@ -968,6 +968,9 @@ This function returns an object with three keys:
       }
       command = preWrap + command + postWrap;
       try {
+        if ((this.scope["eval"] == null) && (this.scope.execScript != null)) {
+          this.scope.execScript("null");
+        }
         return this.scope["eval"](command);
       } catch (_error) {
         e = _error;
