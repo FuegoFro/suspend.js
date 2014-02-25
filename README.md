@@ -41,7 +41,7 @@ evaluator.eval('data = getData()');
 
 The only library that Suspend relies on to run is [Esprima][]. Make sure it is loaded into the page before trying to eval any code using Suspend. Suspend also assumes that you are in a browser-like environment, particularly that a ```document``` exists, can create an ```iframe``` and append it to ```document.body```. This is used for sandboxing evaluated Javascript.
 
-To build, you will additionally need [Node.js](nodejs.org).
+To build, you will additionally need [Node.js][].
 
 
 ### Building
@@ -122,4 +122,5 @@ While many parts of interpreter are complete, it is still under development and 
 
 This project was developed using Behavior Driven Development and has a complete test suite. This helps to ensure correctness (at least within the domain of what is tested) since this project is decently complex and has many edge cases.
 
-[esprima]: esprima.org "Esprima"
+[Esprima]: http://esprima.org "Esprima"
+[Node.js]: http://nodejs.org "Node.js"
